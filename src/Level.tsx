@@ -1,5 +1,5 @@
 import { useHeightfield, useBox } from '@react-three/cannon'
-import { useMemo, useRef } from 'react'
+import React, { useMemo, useRef } from 'react'
 import * as THREE from 'three'
 
 // Terrain generation parameters
@@ -118,23 +118,35 @@ function FallingCubes() {
     return <FallingCubesInner key={`${cubeCount}-${cubeScale}`} count={cubeCount} scale={cubeScale} gridSize={cubeGridSize} colorBg={cubeColorBg} colorGrid={cubeColorGrid} />
 }
 
-function FallingCubesInner({ count, scale, gridSize, colorBg, colorGrid }: { count: number, scale: number, gridSize: number, colorBg: string, colorGrid: string }) {
-    const [ref] = useBox(() => ({
-        mass: 1,
-        allowSleep: true,
-        sleepSpeedLimit: 0.5,
-        sleepTimeLimit: 0.1,
-        position: (() => {
+const FallingCubesInner = React.memo(({ count, scale, gridSize, colorBg, colorGrid }: { count: number, scale: number, gridSize: number, colorBg: string, colorGrid: string }) => {
+    // CRITICAL FIX: Memoize initial spawn positions to prevent physics reset on re-render
+    // Without this, Math.random() in useBox generates new positions each time, 
+    // causing cubes to "jump" when transitioning from setup to countdown/playing
+    const initialTransforms = useMemo(() => {
+        const transforms: { position: [number, number, number], rotation: [number, number, number] }[] = []
+        for (let i = 0; i < count; i++) {
             let x, z
             do {
                 x = (Math.random() - 0.5) * WIDTH * SCALE * 0.8
                 z = (Math.random() - 0.5) * DEPTH * SCALE * 0.8
             } while (x * x + z * z < 20 * 20) // Clear radius of 20
-            return [x, 5 + Math.random() * 5, z]
-        })(),
-        rotation: [Math.random() * Math.PI, Math.random() * Math.PI, 0],
+            transforms.push({
+                position: [x, 2 + Math.random() * 5, z], // Lower drop height (was 5-10, now 2-7)
+                rotation: [Math.random() * Math.PI, Math.random() * Math.PI, 0]
+            })
+        }
+        return transforms
+    }, [count]) // Only regenerate when count changes
+
+    const [ref] = useBox((index) => ({
+        mass: 10, // Heavier (was 1) to settle quicker and be more solid
+        allowSleep: true,
+        sleepSpeedLimit: 1.0, // Increased sleep threshold to let them settle faster
+        sleepTimeLimit: 0.1,
+        position: initialTransforms[index].position,
+        rotation: initialTransforms[index].rotation,
         args: [scale, scale, scale]
-    }), useRef<THREE.InstancedMesh>(null), [count, scale])
+    }), useRef<THREE.InstancedMesh>(null), [initialTransforms, scale])
 
     // Gray Grid for Cubes (Light Background, Dark Grid)
     const texture = useGridTexture(colorBg, colorGrid, gridSize)
@@ -145,7 +157,7 @@ function FallingCubesInner({ count, scale, gridSize, colorBg, colorGrid }: { cou
             <meshStandardMaterial map={texture} />
         </instancedMesh>
     )
-}
+})
 
 function BoundaryWalls() {
     const width = WIDTH * SCALE

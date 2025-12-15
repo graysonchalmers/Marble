@@ -180,9 +180,12 @@ export function SettingsMenu() {
         jumpForce, setJumpForce,
         moveSpeed, setMoveSpeed,
         enemySpeed, setEnemySpeed,
+        enemySize, setEnemySize,
+        enemyMass, setEnemyMass,
         gravity, setGravity,
         friction, setFriction,
         restitution, setRestitution,
+        worldScale, setWorldScale,
         cubeCount, setCubeCount,
         cubeScale, setCubeScale,
         soundEnabled, setSoundEnabled,
@@ -204,11 +207,6 @@ export function SettingsMenu() {
         cubeGridSize, setCubeGridSize,
         cubeColorBg, setCubeColorBg,
         cubeColorGrid, setCubeColorGrid,
-
-        // Performance
-        worldScale, setWorldScale,
-        physicsIterations, setPhysicsIterations,
-        aiTickRate, setAiTickRate,
 
         // Audio
         masterVolume, setMasterVolume,
@@ -297,6 +295,8 @@ export function SettingsMenu() {
                         <div style={{ height: '10px' }} />
                         <Toggle label="V2 Smart AI" value={useV2AI} onChange={setUseV2AI} />
                         <Slider label="Enemy Speed" value={enemySpeed} onChange={setEnemySpeed} min={1} max={20} step={0.5} color={uiAccentColor} />
+                        <Slider label="Enemy Size" value={enemySize} onChange={setEnemySize} min={0.2} max={3.0} step={0.1} color={uiAccentColor} />
+                        <Slider label="Enemy Weight" value={enemyMass} onChange={setEnemyMass} min={0.1} max={10.0} step={0.1} color={uiAccentColor} />
                         <Slider label="Enemy Air Control" value={enemyAirControl} onChange={setEnemyAirControl} min={0} max={1} step={0.05} color={uiAccentColor} />
                     </CollapsibleSection>
 
@@ -308,43 +308,7 @@ export function SettingsMenu() {
                         <Slider label="Gravity (Y)" value={gravity} onChange={setGravity} min={-40} max={-1} step={0.5} color={COLORS.muted} />
                         <Slider label="Bounciness" value={restitution} onChange={setRestitution} min={0} max={1.5} step={0.1} color={COLORS.muted} />
                         <Slider label="Friction" value={friction} onChange={setFriction} min={0} max={1} step={0.05} color={COLORS.muted} />
-                    </CollapsibleSection>
-
-                    <CollapsibleSection
-                        title="⚡ Performance"
-                        isOpen={sectionStates['performance']}
-                        onToggle={() => setSectionState('performance', !sectionStates['performance'])}
-                    >
-                        <Slider
-                            label="World Scale"
-                            value={worldScale}
-                            onChange={setWorldScale}
-                            min={0.25}
-                            max={3}
-                            step={0.25}
-                            color={COLORS.primary}
-                            tooltip="Giant Mode (<1) = Heavy/Slow. Toy Mode (>1) = Snappy/Light. Scales gravity & speed together."
-                        />
-                        <Slider
-                            label="Physics Iterations"
-                            value={physicsIterations}
-                            onChange={setPhysicsIterations}
-                            min={5}
-                            max={100}
-                            step={5}
-                            color={COLORS.muted}
-                            tooltip="Higher = more accurate physics, lower FPS"
-                        />
-                        <Slider
-                            label="AI Tick Rate (Hz)"
-                            value={aiTickRate}
-                            onChange={setAiTickRate}
-                            min={2}
-                            max={60}
-                            step={2}
-                            color={uiAccentColor}
-                            tooltip="How often enemy AI updates per second"
-                        />
+                        <Slider label="World Scale" value={worldScale} onChange={setWorldScale} min={0.25} max={4} step={0.25} color={COLORS.primary} tooltip="Adjusts relative gravity/speed feel: <1 = Giant Mode, >1 = Toy Mode" />
                     </CollapsibleSection>
 
                     <CollapsibleSection

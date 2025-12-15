@@ -1,8 +1,11 @@
 
 
+import * as THREE from 'three'
+
 class SoundManager {
     ctx: AudioContext | null = null
     masterGain: GainNode | null = null
+
     enabled: boolean = true
 
     // Continuous Sonar Logic
@@ -305,13 +308,94 @@ class SoundManager {
         // Update Pitch
         this.sonarOsc.frequency.setTargetAtTime(pitch, now, 0.1)
 
-        // Volume Falloff
         let distVol = Math.max(0, 1 - (distance / maxDist))
         distVol = Math.pow(distVol, 2) // Quadratic falloff
 
         const finalVol = distVol * settings.audioToneVolume * globalMult
 
         this.sonarGain.gain.setTargetAtTime(finalVol, now, 0.1)
+    }
+
+    // --- Spatial Audio ---
+
+    updateListener(camera: THREE.Camera) {
+        if (!this.enabled || !this.ctx) return
+
+        const listener = this.ctx.listener
+
+        // Ensure camera has up to date matrices
+        // camera.updateMatrixWorld() // Usually done by renderer, but safe to assume it's close enough in useFrame
+
+        const pos = new THREE.Vector3()
+        pos.setFromMatrixPosition(camera.matrixWorld)
+
+        const forward = new THREE.Vector3(0, 0, -1)
+        forward.applyQuaternion(camera.quaternion)
+
+        const up = new THREE.Vector3(0, 1, 0)
+        up.applyQuaternion(camera.quaternion)
+
+        if (listener.positionX) {
+            // Standard Web Audio API
+            listener.positionX.value = pos.x
+            listener.positionY.value = pos.y
+            listener.positionZ.value = pos.z
+
+            listener.forwardX.value = forward.x
+            listener.forwardY.value = forward.y
+            listener.forwardZ.value = forward.z
+
+            listener.upX.value = up.x
+            listener.upY.value = up.y
+            listener.upZ.value = up.z
+        } else {
+            // Deprecated setPosition/setOrientation logic if needed, but modern browsers support automation
+            // (listener as any).setPosition(pos.x, pos.y, pos.z)
+            // (listener as any).setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z)
+        }
+    }
+
+    playSpatialPing(position: THREE.Vector3, frequency: number = 800) {
+        if (!this.enabled || !this.ctx || !this.masterGain) return
+        this.resume()
+
+        const now = this.ctx.currentTime
+
+        // Create Panner
+        const panner = this.ctx.createPanner()
+        panner.panningModel = 'HRTF'
+        panner.distanceModel = 'inverse'
+        panner.refDistance = 10
+        panner.maxDistance = 100
+        panner.rolloffFactor = 1
+
+        panner.positionX.value = position.x
+        panner.positionY.value = position.y
+        panner.positionZ.value = position.z
+
+        panner.connect(this.masterGain)
+
+        // Create Sound Source
+        const osc = this.ctx.createOscillator()
+        const gain = this.ctx.createGain()
+
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(frequency, now)
+
+        gain.gain.setValueAtTime(0, now)
+        gain.gain.linearRampToValueAtTime(0.5, now + 0.05)
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2)
+
+        osc.connect(gain)
+        gain.connect(panner)
+
+        osc.start(now)
+        osc.stop(now + 0.3)
+
+        // Cleanup panner nodes after sound is done
+        setTimeout(() => {
+            panner.disconnect()
+        }, 400)
     }
 }
 

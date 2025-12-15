@@ -9,9 +9,12 @@ export interface Settings {
     jumpForce: number
     moveSpeed: number
     enemySpeed: number
+    enemySize: number
+    enemyMass: number
     gravity: number
     friction: number
     restitution: number
+    worldScale: number
 
     // Level
     cubeCount: number
@@ -31,11 +34,6 @@ export interface Settings {
     useV2AI: boolean
     playerAirControl: number
     enemyAirControl: number
-
-    // Performance
-    worldScale: number
-    physicsIterations: number
-    aiTickRate: number
 
     // Debug
     showPerf: boolean
@@ -80,9 +78,12 @@ const DEFAULT_SETTINGS: Settings = {
     jumpForce: 5,
     moveSpeed: 8,
     enemySpeed: 3,
+    enemySize: 0.6,
+    enemyMass: 1.5,
     gravity: -9.81,
     friction: 0.1,
     restitution: 0.5,
+    worldScale: 1.0,
     cubeCount: 30,
     cubeScale: 7,
     soundEnabled: true,
@@ -94,9 +95,6 @@ const DEFAULT_SETTINGS: Settings = {
     useV2AI: true,
     playerAirControl: 0.1,
     enemyAirControl: 0.1,
-    worldScale: 1.0,
-    physicsIterations: 20,
-    aiTickRate: 10,
     showPerf: true,
     controlsOpen: true,
     sectionStates: {
@@ -150,9 +148,12 @@ interface SettingsContextType extends Settings {
     setJumpForce: Dispatch<SetStateAction<number>>
     setMoveSpeed: Dispatch<SetStateAction<number>>
     setEnemySpeed: Dispatch<SetStateAction<number>>
+    setEnemySize: Dispatch<SetStateAction<number>>
+    setEnemyMass: Dispatch<SetStateAction<number>>
     setGravity: Dispatch<SetStateAction<number>>
     setFriction: Dispatch<SetStateAction<number>>
     setRestitution: Dispatch<SetStateAction<number>>
+    setWorldScale: Dispatch<SetStateAction<number>>
     setCubeCount: Dispatch<SetStateAction<number>>
     setCubeScale: Dispatch<SetStateAction<number>>
 
@@ -168,9 +169,6 @@ interface SettingsContextType extends Settings {
     setUseV2AI: Dispatch<SetStateAction<boolean>>
     setPlayerAirControl: Dispatch<SetStateAction<number>>
     setEnemyAirControl: Dispatch<SetStateAction<number>>
-    setWorldScale: Dispatch<SetStateAction<number>>
-    setPhysicsIterations: Dispatch<SetStateAction<number>>
-    setAiTickRate: Dispatch<SetStateAction<number>>
     setShowPerf: Dispatch<SetStateAction<boolean>>
 
     setControlsOpen: Dispatch<SetStateAction<boolean>>
@@ -253,9 +251,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const [jumpForce, setJumpForce] = useState(initialSettings.jumpForce)
     const [moveSpeed, setMoveSpeed] = useState(initialSettings.moveSpeed)
     const [enemySpeed, setEnemySpeed] = useState(initialSettings.enemySpeed)
+    const [enemySize, setEnemySize] = useState(initialSettings.enemySize ?? 0.6)
+    const [enemyMass, setEnemyMass] = useState(initialSettings.enemyMass ?? 1.5)
     const [gravity, setGravity] = useState(initialSettings.gravity)
     const [friction, setFriction] = useState(initialSettings.friction)
     const [restitution, setRestitution] = useState(initialSettings.restitution)
+    const [worldScale, setWorldScale] = useState(initialSettings.worldScale ?? 1.0)
     const [cubeCount, setCubeCount] = useState(initialSettings.cubeCount)
     const [cubeScale, setCubeScale] = useState(initialSettings.cubeScale)
     const [soundEnabled, setAudioEnabled] = useState(initialSettings.soundEnabled)
@@ -268,9 +269,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const [useV2AI, setUseV2AI] = useState(initialSettings.useV2AI)
     const [playerAirControl, setPlayerAirControl] = useState(initialSettings.playerAirControl)
     const [enemyAirControl, setEnemyAirControl] = useState(initialSettings.enemyAirControl)
-    const [worldScale, setWorldScale] = useState(initialSettings.worldScale)
-    const [physicsIterations, setPhysicsIterations] = useState(initialSettings.physicsIterations)
-    const [aiTickRate, setAiTickRate] = useState(initialSettings.aiTickRate)
 
     const [showPerf, setShowPerf] = useState(initialSettings.showPerf)
     const [controlsOpen, setControlsOpen] = useState(initialSettings.controlsOpen)
@@ -345,11 +343,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     // Persist changes
     useEffect(() => {
         const settingsToSave: Partial<Settings> = {
-            jumpForce, moveSpeed, enemySpeed, gravity, friction, restitution,
+            jumpForce, moveSpeed, enemySpeed, enemySize, enemyMass, gravity, friction, restitution, worldScale,
             cubeCount, cubeScale, soundEnabled, physicsRate, shadowsEnabled,
             pixelRatio, cameraStiffness, cameraOffset, useV2AI, playerAirControl,
-            enemyAirControl, worldScale, physicsIterations, aiTickRate,
-            showPerf, controlsOpen, sectionStates,
+            enemyAirControl, showPerf, controlsOpen, sectionStates,
             groundGridSize, groundColorBg, groundColorGrid, cubeGridSize, cubeColorBg, cubeColorGrid,
             uiAccentColor,
             masterVolume, audioPitchEnabled, audioRateEnabled,
@@ -360,11 +357,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(settingsToSave))
     }, [
-        jumpForce, moveSpeed, enemySpeed, gravity, friction, restitution,
+        jumpForce, moveSpeed, enemySpeed, enemySize, enemyMass, gravity, friction, restitution, worldScale,
         cubeCount, cubeScale, soundEnabled, physicsRate, shadowsEnabled,
         pixelRatio, cameraStiffness, cameraOffset, useV2AI, playerAirControl,
-        enemyAirControl, worldScale, physicsIterations, aiTickRate,
-        showPerf, controlsOpen, sectionStates,
+        enemyAirControl, showPerf, controlsOpen, sectionStates,
         groundGridSize, groundColorBg, groundColorGrid, cubeGridSize, cubeColorBg, cubeColorGrid,
         uiAccentColor,
         masterVolume, audioPitchEnabled, audioRateEnabled,
@@ -425,9 +421,12 @@ gameplay:
             jumpForce, setJumpForce,
             moveSpeed, setMoveSpeed,
             enemySpeed, setEnemySpeed,
+            enemySize, setEnemySize,
+            enemyMass, setEnemyMass,
             gravity, setGravity,
             friction, setFriction,
             restitution, setRestitution,
+            worldScale, setWorldScale,
             cubeCount, setCubeCount,
             cubeScale, setCubeScale,
             soundEnabled, setSoundEnabled,
@@ -452,9 +451,6 @@ gameplay:
             enemyPosition, setEnemyPosition,
             playerAirControl, setPlayerAirControl,
             enemyAirControl, setEnemyAirControl,
-            worldScale, setWorldScale,
-            physicsIterations, setPhysicsIterations,
-            aiTickRate, setAiTickRate,
 
             controlsOpen, setControlsOpen,
             sectionStates, setSectionState,

@@ -19,20 +19,20 @@ export function EnemySphereV2({ playerPos, positionRef }: {
     playerPos: React.MutableRefObject<THREE.Vector3>,
     positionRef?: React.MutableRefObject<THREE.Vector3>
 }) {
-    const { enemySpeed, isPaused, gameState, setGameState, setEnemyAIState, setEnemyPosition, enemyAirControl, aiTickRate } = useSettings()
+    const { enemySpeed, isPaused, gameState, setGameState, setEnemyAIState, setEnemyPosition, enemyAirControl, enemySize, enemyMass } = useSettings()
     const { scene } = useThree()
 
     // Spawn point
     const SPAWN_POS: [number, number, number] = [0, 20, -15]
 
     const [ref, api] = useSphere(() => ({
-        mass: 1.5,
+        mass: enemyMass,
         position: SPAWN_POS,
-        args: [0.6],
+        args: [enemySize],
         material: { friction: 0.8, restitution: 0.1 }, // Higher friction, lower bounce
         type: 'Dynamic',
         linearDamping: 0.8,  // Higher damping for better braking/turning
-        angularDamping: 0.7
+        angularDamping: 0.3  // Lower damping to allow visual rolling
     }))
 
     const position = useRef(new THREE.Vector3(...SPAWN_POS))
@@ -85,7 +85,7 @@ export function EnemySphereV2({ playerPos, positionRef }: {
 
     // Optimization: Throttle AI vision updates
     const lastAIUpdate = useRef(0)
-    const AI_UPDATE_INTERVAL = 1 / aiTickRate // Configurable via settings
+    const AI_UPDATE_INTERVAL = 0.1 // Update AI logic every 100ms (10Hz)
 
     // Throttle UI state updates even more
     const lastUIUpdate = useRef(0)
@@ -110,9 +110,6 @@ export function EnemySphereV2({ playerPos, positionRef }: {
     }
 
     useFrame((state, delta) => {
-        // PHYSICS HITCH FIX: Clamp delta to prevent instability during frame drops
-        const clampedDelta = Math.min(delta, 0.05) // Max 50ms (20 FPS floor)
-
         if (isPaused) return
         if (gameState !== 'playing') {
             if (gameState === 'setup' || gameState === 'countdown') {
@@ -129,24 +126,13 @@ export function EnemySphereV2({ playerPos, positionRef }: {
         updateObstacleCache(currentTime)
 
         // 1. Calculate Player Velocity - REUSE tempVec1 instead of cloning
-        // Use clampedDelta to prevent wild velocity estimates during hitches
         tempVec1.current.copy(playerPos.current) // currentPlayerPos
-        if (clampedDelta > 0) {
+        if (delta > 0) {
             tempVec2.current.copy(tempVec1.current).sub(playerPrevPos.current) // displacement
-            tempVec2.current.divideScalar(clampedDelta) // instantaneousVel
+            tempVec2.current.divideScalar(delta) // instantaneousVel
             playerVel.current.lerp(tempVec2.current, 0.1)
         }
         playerPrevPos.current.copy(tempVec1.current)
-
-        // VELOCITY CAP: Prevent "physics defying" launches
-        const MAX_VELOCITY = 25
-        if (velocity.current.lengthSq() > MAX_VELOCITY * MAX_VELOCITY) {
-            api.velocity.set(
-                velocity.current.x * 0.95,
-                velocity.current.y,
-                velocity.current.z * 0.95
-            )
-        }
 
         // AI LOGIC THROTTLE
         if (currentTime - lastAIUpdate.current > AI_UPDATE_INTERVAL) {
@@ -201,7 +187,7 @@ export function EnemySphereV2({ playerPos, positionRef }: {
             const checkDir = velocity.current.length() > 1 ? tempVec4.current : tempVec3.current
 
             avoidanceRaycaster.current.set(position.current, checkDir)
-            avoidanceRaycaster.current.far = 3.0
+            avoidanceRaycaster.current.far = enemySize + 2.4
 
             const avoidIntersects = avoidanceRaycaster.current.intersectObjects(cachedObstacles.current, false)
             lastAvoidanceForce.current.set(0, 0, 0) // Reset
@@ -223,9 +209,9 @@ export function EnemySphereV2({ playerPos, positionRef }: {
         // 4. Ground Check - REUSE groundRaycaster
         groundRaycaster.current.set(position.current, downVector.current)
         groundRaycaster.current.near = 0
-        groundRaycaster.current.far = 1.0
+        groundRaycaster.current.far = enemySize + 0.4
         const groundIntersects = groundRaycaster.current.intersectObjects(cachedObstacles.current, false)
-        isGrounded.current = groundIntersects.length > 0 && groundIntersects[0].distance <= 0.8
+        isGrounded.current = groundIntersects.length > 0 && groundIntersects[0].distance <= (enemySize + 0.2)
         const controlMultiplier = isGrounded.current ? 1.0 : enemyAirControl
 
         // 5. Movement Application (Every Frame) - Use cached target, REUSE tempVec2 for direction
@@ -265,7 +251,8 @@ export function EnemySphereV2({ playerPos, positionRef }: {
         const dist = position.current.distanceTo(tempVec1.current)
         if (currentTime > nextPingTime.current) {
             const interval = THREE.MathUtils.clamp(THREE.MathUtils.mapLinear(dist, 5, 50, 0.2, 1.5), 0.2, 1.5)
-            soundManager.playPing(800 + (50 - dist) * 10)
+            // soundManager.playPing(800 + (50 - dist) * 10)
+            soundManager.playSpatialPing(position.current, 800 + (50 - dist) * 10)
             nextPingTime.current = currentTime + interval
         }
 
@@ -274,7 +261,9 @@ export function EnemySphereV2({ playerPos, positionRef }: {
             api.position.set(10, 20, 10)
             api.velocity.set(0, 0, 0)
         }
-        if (dist < 1.1) {
+        // Tag Logic: Check if distance is less than sum of radii (Enemy + Player 0.5)
+        // Add tiny buffer (0.1) to ensure it triggers on contact
+        if (dist < (enemySize + 0.5 + 0.1)) {
             soundManager.playBonkSound()
             setGameState('gameover')
         }
@@ -301,7 +290,7 @@ export function EnemySphereV2({ playerPos, positionRef }: {
     return (
         <>
             <mesh ref={ref as any} castShadow>
-                <sphereGeometry args={[0.6, 32, 32]} />
+                <sphereGeometry args={[enemySize, 32, 32]} />
                 <meshStandardMaterial
                     map={texture}
                     color="#ffffff"

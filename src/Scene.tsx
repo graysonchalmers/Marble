@@ -24,18 +24,18 @@ function GameLogic({ playerPos, enemyPos }: { playerPos: React.MutableRefObject<
     useFrame((_state, delta) => {
         if (gameState !== 'playing' || !playerPos.current || !enemyPos.current) return
 
-        // PHYSICS HITCH FIX: Clamp delta to prevent extreme values during frame drops
-        const clampedDelta = Math.min(delta, 0.05) // Max 50ms (20 FPS floor)
-
         const dist = playerPos.current.distanceTo(enemyPos.current)
         // Closing speed: Positive if distance decreased (getting closer)
-        // Use clampedDelta to prevent extreme values during hitches
-        const closingSpeed = -(dist - lastDistRef.current) / clampedDelta
+        const closingSpeed = -(dist - lastDistRef.current) / delta
 
         soundManager.updateSonar(dist, closingSpeed, settings)
 
+        // Update audio listener position/orientation
+        soundManager.updateListener(_state.camera)
+
         // Throttle UI updates to ~5Hz (every 0.2s)
-        throttleRef.current += clampedDelta
+
+        throttleRef.current += delta
         if (throttleRef.current > 0.2) {
             setDebugVelocity(closingSpeed)
             throttleRef.current = 0
@@ -92,9 +92,9 @@ function PerfBridge() {
 function SceneInner() {
     const {
         isPaused, gameState, setGameState, countdownValue, setCountdownValue,
-        gravity, friction, restitution,
+        gravity, friction, restitution, worldScale,
         physicsRate, shadowsEnabled, pixelRatio, useV2AI,
-        worldScale, physicsIterations
+        enemySize, enemyMass
     } = useSettings()
 
     // Initialize with spawn positions to prevent immediate collision
@@ -136,6 +136,7 @@ function SceneInner() {
     }, [gameState, isPaused])
 
     // Memoize physics props to prevent world reset
+    // World Scale affects gravity: higher scale = stronger gravity (snappy/toy), lower = weaker (heavy/giant)
     const gravityVec = useMemo<[number, number, number]>(() => [0, gravity * worldScale, 0], [gravity, worldScale])
     const contactMat = useMemo(() => ({ friction, restitution }), [friction, restitution])
 
@@ -187,7 +188,7 @@ function SceneInner() {
                 stepSize={1 / physicsRate}
                 isPaused={isPaused || gameState === 'gameover'}
                 defaultContactMaterial={contactMat}
-                iterations={physicsIterations}
+                iterations={20}
                 broadphase="SAP"
             >
                 <Level />
@@ -196,7 +197,11 @@ function SceneInner() {
                 {/* Let's keep physics running for countdown so they settle, but enemy shouldn't move. */}
                 <PlayerSphere positionRef={playerPosRef} />
                 {useV2AI ? (
-                    <EnemySphereV2 playerPos={playerPosRef} positionRef={enemyPosRef} />
+                    <EnemySphereV2
+                        key={`enemy-v2-${enemySize}-${enemyMass}`}
+                        playerPos={playerPosRef}
+                        positionRef={enemyPosRef}
+                    />
                 ) : (
                     <EnemySphere playerPos={playerPosRef} positionRef={enemyPosRef} />
                 )}
