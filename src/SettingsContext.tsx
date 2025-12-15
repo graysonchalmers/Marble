@@ -77,24 +77,24 @@ const STORAGE_KEY = 'MARBLE_GAME_SETTINGS_V2'
 const DEFAULT_SETTINGS: Settings = {
     jumpForce: 5,
     moveSpeed: 8,
-    enemySpeed: 3,
-    enemySize: 0.6,
-    enemyMass: 1.5,
-    gravity: -9.81,
-    friction: 0.1,
-    restitution: 0.5,
-    worldScale: 1.0,
+    enemySpeed: 2,
+    enemySize: 0.9,
+    enemyMass: 2.5,
+    gravity: -22.5,
+    friction: 0.35,
+    restitution: 0.2,
+    worldScale: 0.75,
     cubeCount: 30,
     cubeScale: 7,
     soundEnabled: true,
     physicsRate: 60,
     shadowsEnabled: true,
     pixelRatio: 1,
-    cameraStiffness: 8,
-    cameraOffset: 10,
+    cameraStiffness: 3,
+    cameraOffset: 15,
     useV2AI: true,
     playerAirControl: 0.1,
-    enemyAirControl: 0.1,
+    enemyAirControl: 0,
     showPerf: true,
     controlsOpen: true,
     sectionStates: {
@@ -104,19 +104,19 @@ const DEFAULT_SETTINGS: Settings = {
         'graphics': true,
         'visuals': true
     },
-    groundGridSize: 64,
+    groundGridSize: 176,
     groundColorBg: '#70b348',
     groundColorGrid: '#3e6b1f',
     cubeGridSize: 256,
     cubeColorBg: '#d3d3d3',
     cubeColorGrid: '#404040',
-    uiAccentColor: '#E53935', // Classy Red Default
+    uiAccentColor: '#E53935',
 
     // Audio Defaults
     masterVolume: 0.5,
     audioPitchEnabled: true,
     audioRateEnabled: true,
-    audioClosingVolume: 1.0,
+    audioClosingVolume: 1,
     audioOpeningVolume: 0.3,
     audioPingVolume: 0.6,
     audioToneVolume: 0.5,
@@ -237,6 +237,7 @@ interface SettingsContextType extends Settings {
 
     restartGame: () => void
     exportSettings: () => void
+    importSettings: (file: File) => void
 
     // Score
     score: number
@@ -384,37 +385,108 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
     const exportSettings = () => {
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-        const markdown = `# Tag! Game Settings Export
-# Exported: ${new Date().toLocaleString()}
-# ============================================
 
-audio:
-  master_volume: ${masterVolume}
-  pitch_enabled: ${audioPitchEnabled}
-  rate_enabled: ${audioRateEnabled}
-  closing_vol: ${audioClosingVolume}
-  opening_vol: ${audioOpeningVolume}
-  ping_vol: ${audioPingVolume}
-  tone_vol: ${audioToneVolume}
-  ping_style: ${audioPingStyle}
-  tone_style: ${audioToneStyle}
+        // Collect all current settings
+        const currentSettings: Settings = {
+            jumpForce, moveSpeed, enemySpeed, enemySize, enemyMass, gravity, friction, restitution, worldScale,
+            cubeCount, cubeScale, soundEnabled, physicsRate, shadowsEnabled,
+            pixelRatio, cameraStiffness, cameraOffset, useV2AI, playerAirControl,
+            enemyAirControl, showPerf, controlsOpen, sectionStates,
+            groundGridSize, groundColorBg, groundColorGrid, cubeGridSize, cubeColorBg, cubeColorGrid,
+            uiAccentColor,
+            masterVolume, audioPitchEnabled, audioRateEnabled,
+            audioClosingVolume, audioOpeningVolume, audioPingVolume, audioToneVolume,
+            audioPingStyle, audioToneStyle,
+            audioClosingMaxDist, audioOpeningMaxDist, audioClosingPitch, audioOpeningPitch,
+            audioSolidDistance, audioPitchModulation, audioStrategy
+        }
 
-gameplay:
-  move_speed: ${moveSpeed}
-  jump_force: ${jumpForce}
-  gravity: ${gravity}
-  friction: ${friction}
-`
+        const json = JSON.stringify(currentSettings, null, 2)
+
         // Create and download file
-        const blob = new Blob([markdown], { type: 'text/yaml' })
+        const blob = new Blob([json], { type: 'application/json' })
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `tag-settings-${timestamp}.yaml`
+        a.download = `marble-settings-${timestamp}.json`
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
         URL.revokeObjectURL(url)
+    }
+
+    const importSettings = (file: File) => {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+            try {
+                const content = e.target?.result as string
+                const imported = JSON.parse(content) as Partial<Settings>
+
+                // Apply settings if they exist in the imported file
+                if (imported.jumpForce !== undefined) setJumpForce(imported.jumpForce)
+                if (imported.moveSpeed !== undefined) setMoveSpeed(imported.moveSpeed)
+                if (imported.enemySpeed !== undefined) setEnemySpeed(imported.enemySpeed)
+                if (imported.enemySize !== undefined) setEnemySize(imported.enemySize)
+                if (imported.enemyMass !== undefined) setEnemyMass(imported.enemyMass)
+                if (imported.gravity !== undefined) setGravity(imported.gravity)
+                if (imported.friction !== undefined) setFriction(imported.friction)
+                if (imported.restitution !== undefined) setRestitution(imported.restitution)
+                if (imported.worldScale !== undefined) setWorldScale(imported.worldScale)
+
+                if (imported.cubeCount !== undefined) setCubeCount(imported.cubeCount)
+                if (imported.cubeScale !== undefined) setCubeScale(imported.cubeScale)
+
+                if (imported.soundEnabled !== undefined) setSoundEnabled(imported.soundEnabled)
+                if (imported.physicsRate !== undefined) setPhysicsRate(imported.physicsRate)
+                if (imported.shadowsEnabled !== undefined) setShadowsEnabled(imported.shadowsEnabled)
+                if (imported.pixelRatio !== undefined) setPixelRatio(imported.pixelRatio)
+                if (imported.cameraStiffness !== undefined) setCameraStiffness(imported.cameraStiffness)
+                if (imported.cameraOffset !== undefined) setCameraOffset(imported.cameraOffset)
+
+                if (imported.useV2AI !== undefined) setUseV2AI(imported.useV2AI)
+                if (imported.playerAirControl !== undefined) setPlayerAirControl(imported.playerAirControl)
+                if (imported.enemyAirControl !== undefined) setEnemyAirControl(imported.enemyAirControl)
+
+                if (imported.showPerf !== undefined) setShowPerf(imported.showPerf)
+                if (imported.controlsOpen !== undefined) setControlsOpen(imported.controlsOpen)
+                if (imported.sectionStates !== undefined) setSectionStates(imported.sectionStates)
+
+                if (imported.groundGridSize !== undefined) setGroundGridSize(imported.groundGridSize)
+                if (imported.groundColorBg !== undefined) setGroundColorBg(imported.groundColorBg)
+                if (imported.groundColorGrid !== undefined) setGroundColorGrid(imported.groundColorGrid)
+                if (imported.cubeGridSize !== undefined) setCubeGridSize(imported.cubeGridSize)
+                if (imported.cubeColorBg !== undefined) setCubeColorBg(imported.cubeColorBg)
+                if (imported.cubeColorGrid !== undefined) setCubeColorGrid(imported.cubeColorGrid)
+                if (imported.uiAccentColor !== undefined) setUiAccentColor(imported.uiAccentColor)
+
+                if (imported.masterVolume !== undefined) setMasterVolume(imported.masterVolume)
+                if (imported.audioPitchEnabled !== undefined) setAudioPitchEnabled(imported.audioPitchEnabled)
+                if (imported.audioRateEnabled !== undefined) setAudioRateEnabled(imported.audioRateEnabled)
+
+                if (imported.audioClosingVolume !== undefined) setAudioClosingVolume(imported.audioClosingVolume)
+                if (imported.audioOpeningVolume !== undefined) setAudioOpeningVolume(imported.audioOpeningVolume)
+                if (imported.audioPingVolume !== undefined) setAudioPingVolume(imported.audioPingVolume)
+                if (imported.audioToneVolume !== undefined) setAudioToneVolume(imported.audioToneVolume)
+
+                if (imported.audioPingStyle !== undefined) setAudioPingStyle(imported.audioPingStyle)
+                if (imported.audioToneStyle !== undefined) setAudioToneStyle(imported.audioToneStyle)
+
+                if (imported.audioClosingMaxDist !== undefined) setAudioClosingMaxDist(imported.audioClosingMaxDist)
+                if (imported.audioOpeningMaxDist !== undefined) setAudioOpeningMaxDist(imported.audioOpeningMaxDist)
+                if (imported.audioClosingPitch !== undefined) setAudioClosingPitch(imported.audioClosingPitch)
+                if (imported.audioOpeningPitch !== undefined) setAudioOpeningPitch(imported.audioOpeningPitch)
+                if (imported.audioSolidDistance !== undefined) setAudioSolidDistance(imported.audioSolidDistance)
+                if (imported.audioPitchModulation !== undefined) setAudioPitchModulation(imported.audioPitchModulation)
+                if (imported.audioStrategy !== undefined) setAudioStrategy(imported.audioStrategy)
+
+                // Force a reload or some notification? 
+                // For now, the state updates should reflect immediately in UI
+            } catch (error) {
+                console.error('Failed to import settings:', error)
+                alert('Failed to import settings. Invalid JSON.')
+            }
+        }
+        reader.readAsText(file)
     }
     return (
         <SettingsContext.Provider value={{
@@ -484,7 +556,8 @@ gameplay:
             score,
 
             restartGame,
-            exportSettings
+            exportSettings,
+            importSettings
         }}>
             {children}
         </SettingsContext.Provider>

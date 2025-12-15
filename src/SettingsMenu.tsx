@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useSettings } from './SettingsContext'
 
 const COLORS = {
@@ -198,7 +198,7 @@ export function SettingsMenu() {
         useV2AI, setUseV2AI,
         playerAirControl, setPlayerAirControl,
         enemyAirControl, setEnemyAirControl,
-        exportSettings,
+        exportSettings, importSettings,
         controlsOpen, setControlsOpen,
         sectionStates, setSectionState,
         groundGridSize, setGroundGridSize,
@@ -226,6 +226,21 @@ export function SettingsMenu() {
         audioPitchModulation, setAudioPitchModulation,
         uiAccentColor, setUiAccentColor
     } = useSettings()
+
+    const fileInputRef = useRef<HTMLInputElement>(null)
+
+    const handleImportClick = () => {
+        fileInputRef.current?.click()
+    }
+
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (file) {
+            importSettings(file)
+            // Reset input so same file can be selected again if needed
+            e.target.value = ''
+        }
+    }
 
     const toggleSettings = () => {
         const newState = !controlsOpen
@@ -421,24 +436,50 @@ export function SettingsMenu() {
                     </CollapsibleSection>
 
                     <div style={{ marginTop: '16px' }}>
-                        <button
-                            onClick={exportSettings}
-                            style={{
-                                width: '100%',
-                                padding: '12px',
-                                background: 'linear-gradient(135deg, #00b8e6, #005ce6)',
-                                border: 'none',
-                                borderRadius: '8px',
-                                color: 'white',
-                                fontSize: '12px',
-                                fontWeight: 'bold',
-                                cursor: 'pointer',
-                                letterSpacing: '0.5px',
-                                boxShadow: '0 4px 15px rgba(0, 100, 255, 0.3)'
-                            }}
-                        >
-                            EXPORT SETTINGS YAML
-                        </button>
+                        <div style={{ display: 'flex', gap: '10px' }}>
+                            <button
+                                onClick={handleImportClick}
+                                style={{
+                                    flex: 1,
+                                    padding: '12px',
+                                    background: 'rgba(255, 255, 255, 0.1)',
+                                    border: '1px solid rgba(255, 255, 255, 0.2)',
+                                    borderRadius: '8px',
+                                    color: 'white',
+                                    fontSize: '11px',
+                                    fontWeight: 'bold',
+                                    cursor: 'pointer',
+                                    letterSpacing: '0.5px'
+                                }}
+                            >
+                                IMPORT JSON
+                            </button>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept=".json"
+                                onChange={handleFileChange}
+                                style={{ display: 'none' }}
+                            />
+                            <button
+                                onClick={exportSettings}
+                                style={{
+                                    flex: 1,
+                                    padding: '12px',
+                                    background: 'linear-gradient(135deg, #00b8e6, #005ce6)',
+                                    border: 'none',
+                                    borderRadius: '8px',
+                                    color: 'white',
+                                    fontSize: '11px',
+                                    fontWeight: 'bold',
+                                    cursor: 'pointer',
+                                    letterSpacing: '0.5px',
+                                    boxShadow: '0 4px 15px rgba(0, 100, 255, 0.3)'
+                                }}
+                            >
+                                EXPORT JSON
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
