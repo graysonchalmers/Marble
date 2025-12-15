@@ -122,8 +122,6 @@ export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefOb
         const timeSinceInput = Date.now() - lastInputTime.current
         if (!isPaused && timeSinceInput > 10000) {
             setIsPaused(true)
-        } else if (isPaused && timeSinceInput < 10000) {
-            setIsPaused(false)
         }
 
         if (isPaused) return

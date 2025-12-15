@@ -5,6 +5,7 @@ import { SettingsProvider, useSettings } from './SettingsContext'
 import { SettingsMenu } from './SettingsMenu'
 import { UnifiedDebugMenu } from './UnifiedDebugMenu'
 import { MiniMap } from './MiniMap'
+import { StartScreen, PauseScreen, GameOverScreen } from './MenuOverlay'
 
 function GameUI() {
   const {
@@ -14,8 +15,7 @@ function GameUI() {
     setGameState,
     countdownValue,
     restartGame,
-    score,
-    uiAccentColor
+    score
   } = useSettings()
 
   // Handle Escape to Pause
@@ -25,10 +25,8 @@ function GameUI() {
         // Only toggle if playing or countdown
         // We can allow pausing in gameover too, but it doesn't do much.
         if (gameState === 'playing' || gameState === 'countdown') {
-          // User requested: "escape... immediately just unpauses again. Maybe I don't want to unpause it until like a mouse click"
-          if (!isPaused) {
-            setIsPaused(true)
-          }
+          // User requested: Toggle pause on Escape
+          setIsPaused(prev => !prev)
         }
       }
     }
@@ -51,15 +49,23 @@ function GameUI() {
       }
     }
 
+    const handleBlur = () => {
+      if (gameState === 'playing' || gameState === 'countdown') {
+        setIsPaused(true)
+      }
+    }
+
     window.addEventListener('keydown', handleKeyDown)
     // Listen for any interaction to unpause
     window.addEventListener('mousedown', handleInteract)
     window.addEventListener('keydown', handleSpaceKey)
+    window.addEventListener('blur', handleBlur)
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('mousedown', handleInteract)
       window.removeEventListener('keydown', handleSpaceKey)
+      window.removeEventListener('blur', handleBlur)
     }
   }, [gameState, isPaused, setIsPaused, setGameState]) // Added setGameState dependency
 
@@ -112,230 +118,17 @@ function GameUI() {
 
       {/* Setup / Start Screen */}
       {gameState === 'setup' && (
-        <div style={{
-          position: 'absolute',
-          inset: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 100,
-          gap: '24px'
-        }}>
-          <h1 style={{
-            fontSize: '3rem',
-            color: 'white',
-            fontFamily: "'Inter', sans-serif",
-            fontWeight: 800,
-            textTransform: 'uppercase',
-            letterSpacing: '4px',
-            textShadow: '0 0 20px rgba(255,255,255,0.4)',
-            marginBottom: '0',
-            textAlign: 'center'
-          }}>
-            Player Ready
-          </h1>
-
-          <button
-            onClick={() => setGameState('countdown')}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'scale(1.05)'
-              e.currentTarget.style.boxShadow = `0 0 40px ${uiAccentColor}80`
-              e.currentTarget.style.borderColor = 'white'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'scale(1)'
-              e.currentTarget.style.boxShadow = `0 0 20px ${uiAccentColor}40`
-              e.currentTarget.style.borderColor = 'rgba(255,255,255,0.5)'
-            }}
-            style={{
-              padding: '20px 60px',
-              fontSize: '1.5rem',
-              background: 'rgba(0, 0, 0, 0.4)',
-              backdropFilter: 'blur(10px)',
-              color: 'white',
-              border: '2px solid rgba(255,255,255,0.5)',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontWeight: 700,
-              letterSpacing: '4px',
-              textTransform: 'uppercase',
-              transition: 'all 0.2s ease-out',
-              boxShadow: `0 0 20px ${uiAccentColor}40`,
-              fontFamily: "'JetBrains Mono', monospace"
-            }}
-          >
-            Start
-          </button>
-
-          <div style={{
-            color: 'rgba(255, 255, 255, 0.5)',
-            fontSize: '0.9rem',
-            letterSpacing: '2px',
-            textTransform: 'uppercase',
-            fontWeight: 600,
-            marginTop: '-16px'
-          }}>
-            Press Space
-          </div>
-        </div>
+        <StartScreen onStart={() => setGameState('countdown')} />
       )}
 
-      {/* Pause Overlay - Full Screen Glass */}
+      {/* Pause Overlay */}
       {isPaused && (
-        <div style={{
-          position: 'absolute',
-          inset: 0,
-          background: 'rgba(5, 5, 8, 0.6)',
-          backdropFilter: 'blur(16px)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 50,
-        }}>
-          <div style={{
-            background: 'rgba(20, 20, 25, 0.85)',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
-            padding: '3rem 5rem',
-            borderRadius: '16px',
-            boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '12px',
-            fontFamily: "'Inter', sans-serif"
-          }}>
-            <div style={{
-              fontSize: '0.9rem',
-              color: uiAccentColor,
-              textTransform: 'uppercase',
-              letterSpacing: '4px',
-              fontWeight: 700,
-              opacity: 0.9
-            }}>
-              System Paused
-            </div>
-            <div style={{
-              fontSize: '3.5rem',
-              fontWeight: 800,
-              color: 'white',
-              textShadow: '0 0 30px rgba(255,255,255,0.05)',
-              letterSpacing: '-1px'
-            }}>
-              Standing By
-            </div>
-            <div style={{
-              marginTop: '12px',
-              color: 'rgba(255,255,255,0.4)',
-              fontSize: '0.9rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              fontWeight: 500
-            }}>
-              <span style={{
-                background: 'rgba(255,255,255,0.1)',
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '0.8rem',
-                color: 'white',
-                fontWeight: 600,
-                border: '1px solid rgba(255,255,255,0.1)'
-              }}>SPACE</span>
-              to Resume
-            </div>
-          </div>
-        </div>
+        <PauseScreen onResume={() => setIsPaused(false)} />
       )}
 
       {/* Game Over Screen */}
       {gameState === 'gameover' && (
-        <div style={{
-          position: 'absolute',
-          inset: 0,
-          background: 'radial-gradient(circle at center, rgba(20, 0, 0, 0.4) 0%, rgba(0, 0, 0, 0.9) 100%)',
-          backdropFilter: 'blur(8px)',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 100,
-          gap: '32px'
-        }}>
-          <h1 style={{
-            fontSize: '6rem',
-            margin: 0,
-            color: uiAccentColor,
-            fontWeight: 900,
-            textTransform: 'uppercase',
-            letterSpacing: '-4px',
-            textShadow: `3px 3px 0px #000, 0 0 30px ${uiAccentColor}66`,
-            WebkitTextStroke: '2px black',
-            fontFamily: "'Inter', sans-serif"
-          }}>
-            Tagged!
-          </h1>
-
-          <div style={{
-            fontFamily: "'Inter', sans-serif",
-            fontSize: '2rem',
-            color: 'white',
-            textAlign: 'center',
-            background: 'rgba(255,255,255,0.1)',
-            padding: '10px 30px',
-            borderRadius: '12px',
-            border: '1px solid rgba(255,255,255,0.2)',
-            textShadow: '0 2px 4px rgba(0,0,0,0.5)'
-          }}>
-            <div style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.7)', textTransform: 'uppercase', letterSpacing: '2px', marginBottom: '4px' }}>
-              Time on the Run
-            </div>
-            <div style={{ fontSize: '2.5rem', fontWeight: 800 }}>
-              {score.toFixed(2)}<span style={{ fontSize: '1.5rem' }}>s</span>
-            </div>
-          </div>
-
-          <button
-            onClick={restartGame}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-2px)'
-              e.currentTarget.style.boxShadow = '0 10px 30px rgba(229, 57, 53, 0.6)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)'
-              e.currentTarget.style.boxShadow = '0 0 20px rgba(229, 57, 53, 0.3)'
-            }}
-            style={{
-              padding: '16px 48px',
-              fontSize: '1.2rem',
-              background: '#E53935', // Red background
-              color: '#ffffff', // White text
-              border: 'none',
-              borderRadius: '50px',
-              cursor: 'pointer',
-              pointerEvents: 'auto',
-              fontWeight: 800,
-              letterSpacing: '1px',
-              textTransform: 'uppercase',
-              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-              boxShadow: '0 0 20px rgba(229, 57, 53, 0.3)'
-            }}
-          >
-            Try Again
-          </button>
-
-          <div style={{
-            color: 'rgba(255, 255, 255, 0.5)',
-            fontSize: '0.8rem',
-            letterSpacing: '2px',
-            textTransform: 'uppercase',
-            fontWeight: 600,
-            marginTop: '-16px'
-          }}>
-            Press Space
-          </div>
-        </div>
+        <GameOverScreen score={score} onRestart={restartGame} />
       )}
 
       {/* Countdown Screen */}
