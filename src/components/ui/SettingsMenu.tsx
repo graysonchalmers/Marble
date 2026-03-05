@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { useSettings } from './SettingsContext'
+import { useGameStore } from '../../store/useGameStore'
 
 const COLORS = {
     primary: '#ffffff', // White (Clean)
@@ -15,46 +15,13 @@ function Tooltip({ text }: { text: string }) {
         <span
             onMouseEnter={() => setVisible(true)}
             onMouseLeave={() => setVisible(false)}
-            style={{
-                position: 'relative',
-                cursor: 'help',
-                marginLeft: '4px',
-                fontSize: '10px',
-                verticalAlign: 'middle',
-                opacity: 0.7
-            }}
+            className="settings-tooltip-icon"
         >
             ⓘ
             {visible && (
-                <div style={{
-                    position: 'absolute',
-                    bottom: '100%',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    marginBottom: '8px',
-                    background: 'rgba(0,0,0,0.9)',
-                    border: '1px solid #444',
-                    padding: '8px',
-                    borderRadius: '4px',
-                    width: '150px',
-                    color: '#fff',
-                    zIndex: 1000,
-                    pointerEvents: 'none',
-                    textAlign: 'center',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                    fontWeight: 'normal',
-                    lineHeight: '1.2'
-                }}>
+                <div className="settings-tooltip-box">
                     {text}
-                    <div style={{
-                        position: 'absolute',
-                        top: '100%',
-                        left: '50%',
-                        marginLeft: '-4px',
-                        borderWidth: '4px',
-                        borderStyle: 'solid',
-                        borderColor: 'black transparent transparent transparent'
-                    }} />
+                    <div className="settings-tooltip-caret" />
                 </div>
             )}
         </span>
@@ -63,26 +30,22 @@ function Tooltip({ text }: { text: string }) {
 
 function Slider({ label, value, onChange, min, max, step, color = COLORS.primary, tooltip }: any) {
     return (
-        <div style={{ marginBottom: '12px' }}>
-            <label style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px', color: '#ccc', fontWeight: 500 }}>
-                <span style={{ display: 'flex', alignItems: 'center' }}>{label} {tooltip && <Tooltip text={tooltip} />}</span>
-                <span style={{ color: color, fontWeight: 'bold', fontFamily: 'monospace' }}>{Math.round(value * 100) / 100}</span>
+        <div className="slider-container">
+            <label className="slider-header">
+                <span className="slider-label">{label} {tooltip && <Tooltip text={tooltip} />}</span>
+                <span className="slider-value" style={{ color: color }}>{Math.round(value * 100) / 100}</span>
             </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div className="slider-input-wrapper">
                 <input
                     type="range"
+                    aria-label={label}
                     min={min}
                     max={max}
                     step={step}
                     value={value}
                     onChange={(e) => onChange(parseFloat(e.target.value))}
-                    style={{
-                        flex: 1,
-                        cursor: 'pointer',
-                        accentColor: color,
-                        height: '4px',
-                        borderRadius: '2px'
-                    }}
+                    className="slider-input"
+                    style={{ accentColor: color }}
                 />
             </div>
         </div>
@@ -92,21 +55,16 @@ function Slider({ label, value, onChange, min, max, step, color = COLORS.primary
 
 function Toggle({ label, value, onChange }: any) {
     return (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '13px', color: '#ccc', fontWeight: 500 }}>{label}</span>
+        <div className="toggle-container">
+            <span className="toggle-label">{label}</span>
             <button
+                aria-label={label}
                 onClick={() => onChange(!value)}
+                className="toggle-button"
                 style={{
                     background: value ? `${COLORS.primary}20` : 'rgba(255, 255, 255, 0.05)',
                     color: value ? COLORS.primary : '#888',
                     border: value ? `1px solid ${COLORS.primary}` : '1px solid #444',
-                    borderRadius: '12px',
-                    padding: '2px 10px',
-                    fontSize: '11px',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    transition: 'all 0.2s',
-                    minWidth: '40px'
                 }}
             >
                 {value ? 'ON' : 'OFF'}
@@ -117,23 +75,16 @@ function Toggle({ label, value, onChange }: any) {
 
 function ColorPicker({ label, value, onChange }: { label: string, value: string, onChange: (val: string) => void }) {
     return (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <span style={{ fontSize: '13px', color: '#ccc', fontWeight: 500 }}>{label}</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#888' }}>{value}</span>
+        <div className="color-picker-container">
+            <span className="color-picker-label">{label}</span>
+            <div className="color-picker-value-wrapper">
+                <span className="color-picker-hex">{value}</span>
                 <input
                     type="color"
+                    aria-label={label}
                     value={value}
                     onChange={(e) => onChange(e.target.value)}
-                    style={{
-                        width: '32px',
-                        height: '24px',
-                        padding: 0,
-                        border: 'none',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        background: 'none'
-                    }}
+                    className="color-picker-input"
                 />
             </div>
         </div>
@@ -142,32 +93,17 @@ function ColorPicker({ label, value, onChange }: { label: string, value: string,
 
 function CollapsibleSection({ title, isOpen, onToggle, children }: { title: string, isOpen: boolean, onToggle: () => void, children: React.ReactNode }) {
     return (
-        <div style={{ marginBottom: '16px', borderRadius: '8px', background: 'rgba(255,255,255,0.03)', overflow: 'hidden' }}>
+        <div className="collapsible-container">
             <button
                 onClick={onToggle}
-                style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    background: 'rgba(255,255,255,0.05)',
-                    border: 'none',
-                    borderBottom: isOpen ? '1px solid rgba(255,255,255,0.05)' : 'none',
-                    color: 'white',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                    cursor: 'pointer',
-                    textAlign: 'left'
-                }}
+                className="collapsible-header"
+                style={{ borderBottom: isOpen ? '1px solid rgba(255,255,255,0.05)' : 'none' }}
             >
                 {title}
                 <span style={{ transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>▼</span>
             </button>
             {isOpen && (
-                <div style={{ padding: '12px' }}>
+                <div className="collapsible-content">
                     {children}
                 </div>
             )}
@@ -176,6 +112,42 @@ function CollapsibleSection({ title, isOpen, onToggle, children }: { title: stri
 }
 
 export function SettingsMenu() {
+    const store = useGameStore()
+    
+    const exportSettings = () => {
+        const toExport = JSON.parse(localStorage.getItem('MARBLE_GAME_SETTINGS_V2') || '{}')
+        const blob = new Blob([JSON.stringify(toExport, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `marble_settings_${new Date().toISOString().split('T')[0]}.json`
+        a.click()
+        URL.revokeObjectURL(url)
+    }
+
+    const importSettings = (file: File) => {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+            try {
+                const parsed = JSON.parse(e.target?.result as string)
+                store.setSettings(parsed)
+            } catch (err) {
+                console.error("Failed to parse settings", err)
+            }
+        }
+        reader.readAsText(file)
+    }
+
+    const proxy = new Proxy(store, {
+        get(target, prop: string) {
+            if (prop.startsWith('set') && prop !== 'setSetting' && prop !== 'setSectionState' && prop !== 'setIsPaused' && prop !== 'setSettings') {
+                const key = prop.charAt(3).toLowerCase() + prop.slice(4)
+                return (val: any) => target.setSetting(key as any, val)
+            }
+            return (target as any)[prop]
+        }
+    })
+
     const {
         jumpForce, setJumpForce,
         moveSpeed, setMoveSpeed,
@@ -198,7 +170,6 @@ export function SettingsMenu() {
         useV2AI, setUseV2AI,
         playerAirControl, setPlayerAirControl,
         enemyAirControl, setEnemyAirControl,
-        exportSettings, importSettings,
         controlsOpen, setControlsOpen,
         sectionStates, setSectionState,
         groundGridSize, setGroundGridSize,
@@ -225,7 +196,7 @@ export function SettingsMenu() {
         audioSolidDistance, setAudioSolidDistance,
         audioPitchModulation, setAudioPitchModulation,
         uiAccentColor, setUiAccentColor
-    } = useSettings()
+    } = proxy as any
 
     const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -249,56 +220,17 @@ export function SettingsMenu() {
     }
 
     return (
-        <div style={{
-            position: 'absolute',
-            top: 20,
-            right: 20,
-            zIndex: 1000,
-            fontFamily: "'Inter', sans-serif",
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-end',
-            maxHeight: 'calc(100vh - 40px)'
-        }}>
+        <div className="settings-panel-wrapper">
             <button
                 onClick={toggleSettings}
-                style={{
-                    padding: '10px 20px',
-                    background: 'rgba(15, 15, 20, 0.8)',
-                    backdropFilter: 'blur(10px)',
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                    borderRadius: '30px',
-                    color: 'white',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    letterSpacing: '0.5px',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                    marginBottom: '10px',
-                    transition: 'all 0.2s',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px'
-                }}
+                className="settings-toggle-btn"
             >
                 <span style={{ fontSize: '16px' }}>⚙️</span>
                 {controlsOpen ? 'Hide Controls' : 'Show Controls'}
             </button>
 
             {controlsOpen && (
-                <div style={{
-                    background: 'rgba(10, 10, 12, 0.95)',
-                    backdropFilter: 'blur(20px)',
-                    padding: '16px',
-                    borderRadius: '16px',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    width: '300px',
-                    boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
-                    color: 'white',
-                    overflowY: 'auto',
-                    scrollbarWidth: 'thin',
-                    scrollbarColor: 'rgba(255,255,255,0.2) transparent'
-                }}>
+                <div className="settings-panel-content">
                     <CollapsibleSection
                         title="🎮 Gameplay"
                         isOpen={sectionStates['gameplay']}
@@ -345,7 +277,7 @@ export function SettingsMenu() {
                         <div style={{ height: 8 }} />
                         <Slider label="Master Volume" value={masterVolume} onChange={setMasterVolume} min={0} max={1} step={0.05} color={COLORS.primary} />
 
-                        <div style={{ margin: '12px 0 8px 0', fontSize: '11px', color: '#888', fontWeight: 700, textTransform: 'uppercase' }}>Behaviors (Dynamic)</div>
+                        <div className="section-subtitle">Behaviors (Dynamic)</div>
                         <Toggle label="Dynamic Pitch (Distance)" value={audioPitchEnabled} onChange={setAudioPitchEnabled} />
                         <Toggle label="Dynamic Rate (Velocity)" value={audioRateEnabled} onChange={setAudioRateEnabled} />
 
@@ -354,25 +286,25 @@ export function SettingsMenu() {
                             <Slider label="Pitch Mod (x)" value={audioPitchModulation} onChange={setAudioPitchModulation} min={0} max={20} step={0.5} color={COLORS.light} />
                         </div>
 
-                        <div style={{ margin: '12px 0 8px 0', fontSize: '11px', color: '#888', fontWeight: 700, textTransform: 'uppercase' }}>Closing State (Red)</div>
+                        <div className="section-subtitle">Closing State (Red)</div>
                         <Slider label="Volume" value={audioClosingVolume} onChange={setAudioClosingVolume} min={0} max={2} step={0.1} color={uiAccentColor} />
                         <Slider label="Max Distance" value={audioClosingMaxDist} onChange={setAudioClosingMaxDist} min={10} max={500} step={10} color={uiAccentColor} />
                         <Slider label="Base Pitch" value={audioClosingPitch} onChange={setAudioClosingPitch} min={10} max={1000} step={10} color={uiAccentColor} />
 
-                        <div style={{ margin: '12px 0 8px 0', fontSize: '11px', color: '#888', fontWeight: 700, textTransform: 'uppercase' }}>Opening State (Green)</div>
+                        <div className="section-subtitle">Opening State (Green)</div>
                         <Slider label="Volume" value={audioOpeningVolume} onChange={setAudioOpeningVolume} min={0} max={1} step={0.1} color={COLORS.primary} />
                         <Slider label="Max Distance" value={audioOpeningMaxDist} onChange={setAudioOpeningMaxDist} min={10} max={500} step={10} color={COLORS.primary} />
                         <Slider label="Base Pitch" value={audioOpeningPitch} onChange={setAudioOpeningPitch} min={10} max={1000} step={10} color={COLORS.primary} />
 
-                        <div style={{ margin: '12px 0 8px 0', fontSize: '11px', color: '#888', fontWeight: 700, textTransform: 'uppercase' }}>Global Mix</div>
+                        <div className="section-subtitle">Global Mix</div>
                         <Slider label="Ping Vol" value={audioPingVolume} onChange={setAudioPingVolume} min={0} max={1} step={0.1} color={COLORS.light} />
                         <Slider label="Tone Vol (Solid)" value={audioToneVolume} onChange={setAudioToneVolume} min={0} max={1} step={0.1} color={COLORS.light} />
 
-                        <div style={{ margin: '12px 0 8px 0', fontSize: '11px', color: '#888', fontWeight: 700, textTransform: 'uppercase' }}>Styles</div>
+                        <div className="section-subtitle">Styles</div>
 
                         <div style={{ marginBottom: '8px' }}>
-                            <span style={{ fontSize: '12px', color: '#ccc', display: 'block', marginBottom: '4px' }}>Ping Waveform</span>
-                            <select value={audioPingStyle} onChange={(e) => setAudioPingStyle(e.target.value as any)} style={{ width: '100%', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', padding: '4px', borderRadius: '4px' }}>
+                            <span className="select-label">Ping Waveform</span>
+                            <select value={audioPingStyle} onChange={(e) => setAudioPingStyle(e.target.value as any)} className="select-input">
                                 <option value="sine">Sine (Smooth)</option>
                                 <option value="square">Square (Retro)</option>
                                 <option value="triangle">Triangle (Soft)</option>
@@ -381,8 +313,8 @@ export function SettingsMenu() {
                         </div>
 
                         <div style={{ marginBottom: '8px' }}>
-                            <span style={{ fontSize: '12px', color: '#ccc', display: 'block', marginBottom: '4px' }}>Tone Waveform</span>
-                            <select value={audioToneStyle} onChange={(e) => setAudioToneStyle(e.target.value as any)} style={{ width: '100%', background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', padding: '4px', borderRadius: '4px' }}>
+                            <span className="select-label">Tone Waveform</span>
+                            <select value={audioToneStyle} onChange={(e) => setAudioToneStyle(e.target.value as any)} className="select-input">
                                 <option value="sine">Sine (Smooth)</option>
                                 <option value="square">Square (Retro)</option>
                                 <option value="triangle">Triangle (Soft)</option>
@@ -396,7 +328,7 @@ export function SettingsMenu() {
                         isOpen={sectionStates['visuals']}
                         onToggle={() => setSectionState('visuals', !sectionStates['visuals'])}
                     >
-                        <div style={{ marginBottom: '8px', fontSize: '11px', color: '#888', textTransform: 'uppercase', fontWeight: 700 }}>Ground</div>
+                        <div className="section-subtitle">Ground</div>
                         <Slider label="Grid Size" value={groundGridSize} onChange={setGroundGridSize} min={16} max={256} step={16} color={COLORS.muted} />
                         <ColorPicker label="Background" value={groundColorBg} onChange={setGroundColorBg} />
                         <ColorPicker label="Background" value={groundColorBg} onChange={setGroundColorBg} />
@@ -404,12 +336,12 @@ export function SettingsMenu() {
 
                         <div style={{ height: '12px' }} />
 
-                        <div style={{ marginBottom: '8px', fontSize: '11px', color: '#888', textTransform: 'uppercase', fontWeight: 700 }}>Interface Theme</div>
+                        <div className="section-subtitle">Interface Theme</div>
                         <ColorPicker label="Accent Color" value={uiAccentColor} onChange={setUiAccentColor} />
 
                         <div style={{ height: '12px' }} />
 
-                        <div style={{ marginBottom: '8px', fontSize: '11px', color: '#888', textTransform: 'uppercase', fontWeight: 700 }}>Cubes</div>
+                        <div className="section-subtitle">Cubes</div>
                         <Slider label="Grid Size" value={cubeGridSize} onChange={setCubeGridSize} min={64} max={512} step={32} color={COLORS.muted} />
                         <ColorPicker label="Background" value={cubeColorBg} onChange={setCubeColorBg} />
                         <ColorPicker label="Grid Lines" value={cubeColorGrid} onChange={setCubeColorGrid} />
@@ -436,21 +368,10 @@ export function SettingsMenu() {
                     </CollapsibleSection>
 
                     <div style={{ marginTop: '16px' }}>
-                        <div style={{ display: 'flex', gap: '10px' }}>
+                        <div className="export-import-container">
                             <button
                                 onClick={handleImportClick}
-                                style={{
-                                    flex: 1,
-                                    padding: '12px',
-                                    background: 'rgba(255, 255, 255, 0.1)',
-                                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                                    borderRadius: '8px',
-                                    color: 'white',
-                                    fontSize: '11px',
-                                    fontWeight: 'bold',
-                                    cursor: 'pointer',
-                                    letterSpacing: '0.5px'
-                                }}
+                                className="import-btn"
                             >
                                 IMPORT JSON
                             </button>
@@ -463,19 +384,7 @@ export function SettingsMenu() {
                             />
                             <button
                                 onClick={exportSettings}
-                                style={{
-                                    flex: 1,
-                                    padding: '12px',
-                                    background: 'linear-gradient(135deg, #00b8e6, #005ce6)',
-                                    border: 'none',
-                                    borderRadius: '8px',
-                                    color: 'white',
-                                    fontSize: '11px',
-                                    fontWeight: 'bold',
-                                    cursor: 'pointer',
-                                    letterSpacing: '0.5px',
-                                    boxShadow: '0 4px 15px rgba(0, 100, 255, 0.3)'
-                                }}
+                                className="export-btn"
                             >
                                 EXPORT JSON
                             </button>

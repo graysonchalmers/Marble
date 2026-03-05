@@ -3,8 +3,8 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { useRef, useEffect, useState, useMemo } from 'react'
 import * as THREE from 'three'
 // Debug Line removed for performance - emissive color on enemy indicates state
-import { useSettings } from './SettingsContext'
-import { soundManager } from './SoundManager'
+import { useGameStore } from '../../store/useGameStore'
+import { soundManager } from '../../audio/SoundManager'
 import {
     createAIState,
     updateAIState,
@@ -19,7 +19,13 @@ export function EnemySphereV2({ playerPos, positionRef }: {
     playerPos: React.MutableRefObject<THREE.Vector3>,
     positionRef?: React.MutableRefObject<THREE.Vector3>
 }) {
-    const { enemySpeed, isPaused, gameState, setGameState, setEnemyAIState, setEnemyPosition, enemyAirControl, enemySize, enemyMass } = useSettings()
+    const enemySpeed = useGameStore(s => s.enemySpeed)
+    const isPaused = useGameStore(s => s.isPaused)
+    const gameState = useGameStore(s => s.gameState)
+    const setGameState = useGameStore(s => s.setGameState)
+    const enemyAirControl = useGameStore(s => s.enemyAirControl)
+    const enemySize = useGameStore(s => s.enemySize)
+    const enemyMass = useGameStore(s => s.enemyMass)
     const { scene } = useThree()
 
     // Spawn point
@@ -162,7 +168,7 @@ export function EnemySphereV2({ playerPos, positionRef }: {
 
             if (newState !== currentState) {
                 setCurrentState(newState)
-                setEnemyAIState(newState)
+                useGameStore.setState({ enemyAIState: newState })
 
                 if (prevState === 'idle' && newState === 'alert') soundManager.playAlertSound()
                 if (prevState === 'chase' && newState === 'search') soundManager.playLostSound()
@@ -202,7 +208,7 @@ export function EnemySphereV2({ playerPos, positionRef }: {
             lookTargetRef.current.copy(cachedTarget.current)
             if (currentTime - lastUIUpdate.current > UI_UPDATE_INTERVAL) {
                 lastUIUpdate.current = currentTime
-                setEnemyPosition({ x: position.current.x, y: position.current.y, z: position.current.z })
+                useGameStore.setState({ enemyPosition: { x: position.current.x, y: position.current.y, z: position.current.z } })
             }
         }
 

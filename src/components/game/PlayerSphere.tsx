@@ -2,13 +2,20 @@ import { useSphere } from '@react-three/cannon'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useState, useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { useSettings } from './SettingsContext'
+import { useGameStore } from '../../store/useGameStore'
 
 const MAX_PARTICLES = 100
 const dummy = new THREE.Object3D()
 
 export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefObject<THREE.Vector3> }) {
-    const { jumpForce, moveSpeed, isPaused, setIsPaused, cameraStiffness, cameraOffset, setPlayerPosition, gameState, playerAirControl } = useSettings()
+    const jumpForce = useGameStore(s => s.jumpForce)
+    const moveSpeed = useGameStore(s => s.moveSpeed)
+    const isPaused = useGameStore(s => s.isPaused)
+    const setIsPaused = useGameStore(s => s.setIsPaused)
+    const cameraStiffness = useGameStore(s => s.cameraStiffness)
+    const cameraOffset = useGameStore(s => s.cameraOffset)
+    const gameState = useGameStore(s => s.gameState)
+    const playerAirControl = useGameStore(s => s.playerAirControl)
 
     const [ref, api] = useSphere(() => ({
         mass: 1,
@@ -69,8 +76,8 @@ export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefOb
         if (positionRef) {
             positionRef.current.set(p[0], p[1], p[2])
         }
-        setPlayerPosition({ x: p[0], y: p[1], z: p[2] }) // Report to debug UI
-    }), [api.position, positionRef, setPlayerPosition])
+        useGameStore.setState({ playerPosition: { x: p[0], y: p[1], z: p[2] } }) // Report to debug UI
+    }), [api.position, positionRef])
     useEffect(() => api.quaternion.subscribe((q) => (physicsQuat.current = q)), [api.quaternion])
 
     // Visual mesh ref (separate from physics body)

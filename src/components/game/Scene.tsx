@@ -5,17 +5,15 @@ import { Physics } from '@react-three/cannon'
 import { Environment, Text, GradientTexture } from '@react-three/drei'
 import { Level } from './Level'
 import { PlayerSphere } from './PlayerSphere'
-import { EnemySphere } from './EnemySphere'
 import { EnemySphereV2 } from './EnemySphereV2'
 import { VectorIndicator } from './VectorIndicator'
 import { CameraOcclusion } from './CameraOcclusion'
-import { useSettings } from './SettingsContext'
-import { soundManager } from './SoundManager'
+import { useGameStore } from '../../store/useGameStore'
+import { soundManager } from '../../audio/SoundManager'
 
 // Logic component that runs inside Canvas
 function GameLogic({ playerPos, enemyPos }: { playerPos: React.MutableRefObject<THREE.Vector3>, enemyPos: React.MutableRefObject<THREE.Vector3> }) {
-    const settings = useSettings()
-    const { gameState, setDebugVelocity } = settings
+    const gameState = useGameStore(s => s.gameState)
 
     // Audio Frame Update
     const lastDistRef = useRef(0)
@@ -28,7 +26,7 @@ function GameLogic({ playerPos, enemyPos }: { playerPos: React.MutableRefObject<
         // Closing speed: Positive if distance decreased (getting closer)
         const closingSpeed = -(dist - lastDistRef.current) / delta
 
-        soundManager.updateSonar(dist, closingSpeed, settings)
+        soundManager.updateSonar(dist, closingSpeed, useGameStore.getState())
 
         // Update audio listener position/orientation
         soundManager.updateListener(_state.camera)
@@ -37,7 +35,7 @@ function GameLogic({ playerPos, enemyPos }: { playerPos: React.MutableRefObject<
 
         throttleRef.current += delta
         if (throttleRef.current > 0.2) {
-            setDebugVelocity(closingSpeed)
+            useGameStore.setState({ debugVelocity: closingSpeed })
             throttleRef.current = 0
         }
 
@@ -48,7 +46,6 @@ function GameLogic({ playerPos, enemyPos }: { playerPos: React.MutableRefObject<
 }
 
 function PerfBridge() {
-    const { setPerfStats } = useSettings()
     // usePerf hook provides access to the GL performance data from r3f-perf
     // Note: this hook usually returns { log, gl, ... }
     // but r3f-perf documentation/types can vary. 
@@ -79,10 +76,12 @@ function PerfBridge() {
         // For now, let's just push FPS. 
         // We'll update only occasionally to avoid React thrashing
         if (state.clock.elapsedTime % 0.5 < 0.05) {
-            setPerfStats({
-                fps: Math.round(fps),
-                cpu: 0, // Placeholder
-                gpu: 0  // Placeholder, requires checking extension support
+            useGameStore.setState({
+                perfStats: {
+                    fps: Math.round(fps),
+                    cpu: 0, 
+                    gpu: 0  
+                }
             })
         }
     })
@@ -90,12 +89,20 @@ function PerfBridge() {
 }
 
 function SceneInner() {
-    const {
-        isPaused, gameState, setGameState, countdownValue, setCountdownValue,
-        gravity, friction, restitution, worldScale,
-        physicsRate, shadowsEnabled, pixelRatio, useV2AI,
-        enemySize, enemyMass
-    } = useSettings()
+    const isPaused = useGameStore(s => s.isPaused)
+    const gameState = useGameStore(s => s.gameState)
+    const setGameState = useGameStore(s => s.setGameState)
+    const countdownValue = useGameStore(s => s.countdownValue)
+    const setCountdownValue = useGameStore(s => s.setCountdownValue)
+    const gravity = useGameStore(s => s.gravity)
+    const friction = useGameStore(s => s.friction)
+    const restitution = useGameStore(s => s.restitution)
+    const worldScale = useGameStore(s => s.worldScale)
+    const physicsRate = useGameStore(s => s.physicsRate)
+    const shadowsEnabled = useGameStore(s => s.shadowsEnabled)
+    const pixelRatio = useGameStore(s => s.pixelRatio)
+    const enemySize = useGameStore(s => s.enemySize)
+    const enemyMass = useGameStore(s => s.enemyMass)
 
     // Initialize with spawn positions to prevent immediate collision
     const playerPosRef = useRef(new THREE.Vector3(0, 5, 0))
@@ -196,15 +203,11 @@ function SceneInner() {
                 {/* Actually, if we spawn them, they might fall if physics is running. */}
                 {/* Let's keep physics running for countdown so they settle, but enemy shouldn't move. */}
                 <PlayerSphere positionRef={playerPosRef} />
-                {useV2AI ? (
-                    <EnemySphereV2
-                        key={`enemy-v2-${enemySize}-${enemyMass}`}
-                        playerPos={playerPosRef}
-                        positionRef={enemyPosRef}
-                    />
-                ) : (
-                    <EnemySphere playerPos={playerPosRef} positionRef={enemyPosRef} />
-                )}
+                <EnemySphereV2
+                    key={`enemy-v2-${enemySize}-${enemyMass}`}
+                    playerPos={playerPosRef}
+                    positionRef={enemyPosRef}
+                />
             </Physics>
 
             <VectorIndicator playerPos={playerPosRef} enemyPos={enemyPosRef} />

@@ -2,7 +2,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { useRef, useState } from 'react'
 import * as THREE from 'three'
 
-import { useSettings } from './SettingsContext'
+import { useGameStore } from '../../store/useGameStore'
 
 /**
  * CameraOcclusion - Disables rendering of objects blocking the camera view
@@ -12,7 +12,7 @@ export function CameraOcclusion({ playerPos }: {
     playerPos: React.MutableRefObject<THREE.Vector3>
 }) {
     const { camera, scene } = useThree()
-    const { cubeScale } = useSettings()
+    const cubeScale = useGameStore(s => s.cubeScale)
 
     // Raycaster
     const raycaster = useRef(new THREE.Raycaster())

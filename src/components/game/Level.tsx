@@ -58,7 +58,7 @@ function generateTerrainData() {
     return { data, visualHeights }
 }
 
-import { useSettings } from './SettingsContext'
+import { useGameStore } from '../../store/useGameStore'
 
 
 function useGridTexture(colorBg: string, colorGrid: string, gridStep: number = 64) {
@@ -114,7 +114,11 @@ function useGridTexture(colorBg: string, colorGrid: string, gridStep: number = 6
 }
 
 function FallingCubes() {
-    const { cubeCount, cubeScale, cubeGridSize, cubeColorBg, cubeColorGrid } = useSettings()
+    const cubeCount = useGameStore(s => s.cubeCount)
+    const cubeScale = useGameStore(s => s.cubeScale)
+    const cubeGridSize = useGameStore(s => s.cubeGridSize)
+    const cubeColorBg = useGameStore(s => s.cubeColorBg)
+    const cubeColorGrid = useGameStore(s => s.cubeColorGrid)
     return <FallingCubesInner key={`${cubeCount}-${cubeScale}`} count={cubeCount} scale={cubeScale} gridSize={cubeGridSize} colorBg={cubeColorBg} colorGrid={cubeColorGrid} />
 }
 
@@ -180,7 +184,9 @@ function BoundaryWalls() {
 }
 
 function Terrain() {
-    const { groundGridSize, groundColorBg, groundColorGrid } = useSettings()
+    const groundGridSize = useGameStore(s => s.groundGridSize)
+    const groundColorBg = useGameStore(s => s.groundColorBg)
+    const groundColorGrid = useGameStore(s => s.groundColorGrid)
     const { data, visualHeights } = useMemo(() => generateTerrainData(), [])
 
     // 1. Physics Body (Invisible)

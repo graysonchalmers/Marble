@@ -1,16 +1,14 @@
 import { useState } from 'react'
-import { useSettings } from './SettingsContext'
+import { useGameStore } from '../../store/useGameStore'
 
 export function UnifiedDebugMenu() {
-    const {
-        useV2AI,
-        enemyAIState,
-        playerPosition,
-        enemyPosition,
-        perfStats, // { fps, cpu, gpu }
-        audioDebugMode,
-        setAudioDebugMode
-    } = useSettings()
+    const useV2AI = useGameStore(s => s.useV2AI)
+    const enemyAIState = useGameStore(s => s.enemyAIState)
+    const playerPosition = useGameStore(s => s.playerPosition)
+    const enemyPosition = useGameStore(s => s.enemyPosition)
+    const perfStats = useGameStore(s => s.perfStats)
+    const audioDebugMode = useGameStore(s => s.audioDebugMode)
+    const setAudioDebugMode = (val: { closingEnabled: boolean, openingEnabled: boolean }) => useGameStore.setState({ audioDebugMode: val })
 
     // Default to OPEN
     const [isOpen, setIsOpen] = useState(true)
@@ -30,35 +28,13 @@ export function UnifiedDebugMenu() {
     }
 
     return (
-        <div style={{
-            position: 'absolute',
-            bottom: 20,
-            left: 20,
-            zIndex: 1000,
-            fontFamily: "'JetBrains Mono', 'Consolas', monospace",
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-start',
-            gap: '8px'
-        }}>
+        <div className="debug-menu-wrapper">
             {/* Toggle Button */}
             <button
                 onClick={() => setIsOpen(!isOpen)}
+                className="debug-menu-toggle"
                 style={{
-                    background: 'rgba(15, 15, 20, 0.8)',
-                    backdropFilter: 'blur(10px)',
-                    border: '1px solid rgba(255, 255, 255, 0.2)',
-                    borderRadius: '8px',
                     color: isOpen ? '#ffffff' : '#888',
-                    padding: '8px 12px',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                    fontWeight: 'bold',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-                    transition: 'all 0.2s'
                 }}
             >
                 <span style={{ fontSize: '14px' }}>{isOpen ? '▼' : '▶'}</span>
@@ -67,30 +43,13 @@ export function UnifiedDebugMenu() {
 
             {/* Menu Content */}
             {isOpen && (
-                <div style={{
-                    background: 'rgba(10, 10, 12, 0.95)',
-                    backdropFilter: 'blur(16px)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    borderRadius: '12px',
-                    padding: '16px',
-                    width: '240px',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
-                    color: '#ccc',
-                    fontSize: '11px'
-                }}>
+                <div className="debug-menu-content">
                     {/* Section: Perf Stats */}
                     <div style={{ marginBottom: '16px' }}>
-                        <div style={{
-                            textTransform: 'uppercase',
-                            color: '#666',
-                            fontSize: '10px',
-                            fontWeight: 'bold',
-                            marginBottom: '6px',
-                            letterSpacing: '0.5px'
-                        }}>
+                        <div className="debug-section-title">
                             Performance
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: '12px' }}>
+                        <div className="debug-row">
                             <span style={{ color: '#fff' }}>FPS</span>
                             <span style={{ color: perfStats.fps < 30 ? '#ff4444' : '#fff' }}>{perfStats.fps}</span>
                         </div>
@@ -99,34 +58,27 @@ export function UnifiedDebugMenu() {
                            Currently placeholder or simple Delta if we implemented it in PerfBridge.
                            We'll show what we have.
                         */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'monospace', fontSize: '12px', opacity: 0.5 }}>
+                        <div className="debug-row" style={{ opacity: 0.5 }}>
                             <span style={{ color: '#aaa' }}>GPU</span>
                             <span>-- ms</span>
                         </div>
                     </div>
 
-                    <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', marginBottom: '16px' }} />
+                    <div className="debug-divider" />
 
                     {/* Section: AI Status */}
                     <div style={{ marginBottom: '16px' }}>
-                        <div style={{
-                            textTransform: 'uppercase',
-                            color: '#666',
-                            fontSize: '10px',
-                            fontWeight: 'bold',
-                            marginBottom: '8px',
-                            letterSpacing: '0.5px'
-                        }}>
+                        <div className="debug-section-title">
                             AI Status
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                        <div className="debug-row">
                             <span>Mode</span>
                             <span style={{ color: useV2AI ? '#ffffff' : '#888' }}>{useV2AI ? 'V2 FSM' : 'V1 Simple'}</span>
                         </div>
 
                         {useV2AI && (
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                            <div className="debug-row">
                                 <span>State</span>
                                 <span style={{
                                     color: stateColors[enemyAIState] || '#fff',
@@ -138,7 +90,7 @@ export function UnifiedDebugMenu() {
                             </div>
                         )}
 
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <div className="debug-row">
                             <span>Distance</span>
                             <span style={{ color: distance < 10 ? '#ff4444' : '#fff' }}>
                                 {distance.toFixed(1)}u
@@ -146,23 +98,16 @@ export function UnifiedDebugMenu() {
                         </div>
                     </div>
 
-                    <div style={{ height: '1px', background: 'rgba(255,255,255,0.1)', marginBottom: '16px' }} />
+                    <div className="debug-divider" />
 
                     {/* Section: Toggles */}
                     <div style={{ marginBottom: '8px' }}>
-                        <div style={{
-                            textTransform: 'uppercase',
-                            color: '#666',
-                            fontSize: '10px',
-                            fontWeight: 'bold',
-                            marginBottom: '8px',
-                            letterSpacing: '0.5px'
-                        }}>
+                        <div className="debug-section-title">
                             Audio Debug
                         </div>
 
                         {/* Audio Debug Toggle */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div className="debug-row" style={{ alignItems: 'center' }}>
                             <span>Sonar Visuals</span>
                             <button
                                 onClick={() => setAudioDebugMode({
@@ -186,7 +131,7 @@ export function UnifiedDebugMenu() {
                     </div>
 
                     {/* Coordinates */}
-                    <div style={{ marginTop: '16px', fontSize: '9px', color: '#555', fontFamily: 'monospace' }}>
+                    <div className="debug-coordinates">
                         <div>P: {playerPosition.x.toFixed(1)}, {playerPosition.y.toFixed(1)}, {playerPosition.z.toFixed(1)}</div>
                         <div>E: {enemyPosition.x.toFixed(1)}, {enemyPosition.y.toFixed(1)}, {enemyPosition.z.toFixed(1)}</div>
                     </div>
