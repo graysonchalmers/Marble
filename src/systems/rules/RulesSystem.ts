@@ -4,6 +4,8 @@ import { soundManager } from "../../audio/SoundManager";
 export class RulesSystem {
   private accumulatedCountdownTime = 0;
   private lastState = "start";
+  /** Deterministic elapsed play time, accumulated from sim `dt` only. Single source of truth for `score` (ARCHITECTURE §4 / F8). */
+  private playElapsed = 0;
 
   tick(dt: number) {
     const state = useGameStore.getState();
@@ -40,14 +42,19 @@ export class RulesSystem {
         }
       }
     } else if (gameState === "playing") {
-      this.lastState = "playing";
-      const { startTime } = state;
-      if (startTime > 0) {
-        useGameStore.setState({ score: (Date.now() - startTime) / 1000 });
+      // On first entering playing, reset the deterministic elapsed-time accumulator
+      if (this.lastState !== "playing") {
+        this.playElapsed = 0;
       }
+      this.lastState = "playing";
+
+      // Score/tagged-time is driven purely by simulated dt, never wall-clock time
+      // (F8: same scripted input must yield the same tagged-time every run).
+      this.playElapsed += dt;
+      useGameStore.setState({ score: this.playElapsed });
     } else if (gameState === "gameover") {
       if (this.lastState === "playing") {
-        // Trigger high score evaluation and saving
+        // Trigger high score evaluation and saving using the dt-accumulated score
         state.saveRecord(state.score);
       }
       this.lastState = "gameover";
@@ -58,6 +65,7 @@ export class RulesSystem {
 
   reset() {
     this.accumulatedCountdownTime = 0;
+    this.playElapsed = 0;
     this.lastState = "setup";
   }
 }

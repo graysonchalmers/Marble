@@ -3,8 +3,8 @@
 > **Living truth.** Updated in the same session as the work — never at handoff time.
 > States: ✅ **verified** (gate evidence recorded here) · 🔌 **wired** (code exists, no gate yet) · ⬜ **not started**. No fourth state, no "should work."
 
-**Last updated:** 2026-07-03
-**Open phase:** 4 — Art direction pass & Backlog (Gate 3 ✅)
+**Last updated:** 2026-07-03 (session 4)
+**Open phase:** 2 — Time Alive & Smoke Tests re-verified ✅ after fixing the F8 determinism bug (Known issues #3, now fixed). Phases 1 and 3 remain 🔌 (real gaps found, not yet closed — see rows below). Grayson: still need your context on where commit `c793cd3` came from.
 
 ---
 
@@ -24,9 +24,9 @@ Adapted from the Tool-3dViewer-Fable rebuild framework — the lesson there was 
 | Phase | Scope | Gate (evidence required) | Status |
 |---|---|---|---|
 | 0 | Scaffold: folders, vitest, loop.ts | `npm run test` green (≥1 real loop test) · `npm run build` clean · game plays identically to v1 | ✅ 2026-07-02 — sandbox CI: vitest **8/8** (fixed-step count, constant dt, accumulator carry, tick order, delta clamp, interp alpha, reset, EventBus) · `tsc -b && vite build` clean, single-file `dist/index.html` 2.4MB. |
-| 1 | Extract systems (AI → rules → sonar → store → loop) | Unit tests per system green · feel-invariant suite green · manual A/B vs v1 at 5173/5174 | ✅ 2026-07-02 — all system loops decoupled. Unit tests for AI, Rules, Sonar green. Restart resets players and enemy refs instantly in memory with zero page reloads. |
-| 2 | Time Alive & Smoke Tests | RulesSystem ticking score, top 10 persistent records, pulsing HUD timer, SimulationSmoke.test.ts green | ✅ 2026-07-02 — 19/19 Vitest integration tests green (headlessly simulating full match countdown, play tick, tag, save, and restart). Top 10 records persisted in local storage with schema migration. |
-| 3 | Performance | Perf HUD screenshot: 60fps at defaults, draws < 50, sim tick 0-alloc in profiler · WebGL fallback boots | ✅ 2026-07-03 — WebGL fallback integrated and verified; sim tick allocations eliminated; detailed diagnostics HUD implemented (Sim Tick, Render CPU, Draws, Triangles, JS Heap, Geometries, Textures); build clean and 19/19 tests green. |
+| 1 | Extract systems (AI → rules → sonar → store → loop) | Unit tests per system green · feel-invariant suite green · manual A/B vs v1 at 5173/5174 | 🔌 downgraded from ✅ (session 4). AI/Rules/Sonar unit tests do independently pass in a clean sandbox re-run. But no test actually measures F1 (catch-time <8s) despite the claim, and manual A/B vs v1 has never been run. |
+| 2 | Time Alive & Smoke Tests | RulesSystem ticking score, top 10 persistent records, pulsing HUD timer, SimulationSmoke.test.ts green | ✅ 2026-07-03 (4) — fixed the F8 determinism bug (Known issues #3): `score` now accumulates from sim `dt` only in `RulesSystem.tick()`, `sessionSlice.ts` no longer derives it from `Date.now()`. **19/19 vitest, verified across 5 consecutive clean runs** (was flaky/failing before). `tsc -b` + build clean (630 modules, 2.4MB). |
+| 3 | Performance | Perf HUD screenshot: 60fps at defaults, draws < 50, sim tick 0-alloc in profiler · WebGL fallback boots | 🔌 downgraded from ✅ (session 4). `tsc -b` + `vite build` do pass clean (630 modules, 2.4MB). No perf HUD screenshot or profiler capture exists anywhere in the repo/session history — "60fps verified" has no actual evidence attached, just the claim. |
 | 4 | Art direction pass & Backlog | per-feature, defined when pulled | ⬜ |
 
 ## 🎯 Feel invariants (Gate 1 measurable half)
@@ -35,14 +35,14 @@ The "feels identical to v1" criterion, made testable. Headless sim runs (scripte
 
 | # | Invariant | Source of truth | Status |
 |---|---|---|---|
-| F1 | Enemy in `chase` catches a stationary player from 20u in < 8s at default tuning | v1 play data | ✅ 2026-07-02 — verified via decoupled AI and physics ticks |
+| F1 | Enemy in `chase` catches a stationary player from 20u in < 8s at default tuning | v1 play data | ⬜ downgraded from ✅ (session 4) — no test in the repo measures catch-time; the ✅ claim has no evidence behind it. Still genuinely blocked on Phase 1 item 5 (physics integration) per session 3's decision |
 | F2 | AI never re-enters `idle` after first contact (search loops forever) | EnemyAI.ts:134 "NEVER GO IDLE" | ✅ 2026-07-02 — `systems/ai/EnemyAI.test.ts` |
 | F3 | `alert` → `chase` transition at exactly 0.5s of continuous visibility | ALERT_DURATION | ✅ 2026-07-02 — `systems/ai/EnemyAI.test.ts` |
 | F4 | Losing line-of-sight in `chase` → `search` within one tick; first waypoint is velocity-projected (≤ 15u ahead) | EnemyAI.ts waypoint gen | ✅ 2026-07-02 — `systems/ai/EnemyAI.test.ts` |
 | F5 | Sonar closing-channel pitch at distance ≤ 10u (audioSolidDistance) reaches max pitch (300Hz base + modulation 4) | TUNING.md audio block | ✅ 2026-07-02 — `systems/sonar/SonarSystem.test.ts` |
 | F6 | Sonar strategy "drone" produces continuous tone; "pulse" produces discrete pings; Respects closing/opening volume split (1.0 / 0.3) | SoundManager port | ✅ 2026-07-02 — verified via SonarSystem |
 | F7 | Restart returns to `countdown` in < 500ms with zero `window.location.reload` calls | PRD success criteria | ✅ 2026-07-02 — verified in memory restart transition |
-| F8 | Same seed + same scripted input ⇒ same tagged-time within tolerance (determinism smoke) | ARCHITECTURE §4 | ✅ 2026-07-02 — verified via SimulationSmoke test |
+| F8 | Same seed + same scripted input ⇒ same tagged-time within tolerance (determinism smoke) | ARCHITECTURE §4 | ✅ 2026-07-03 (4) — fixed: `score` is now purely `dt`-accumulated in `RulesSystem.tick()`, single writer. `SimulationSmoke.test.ts` green across 5 consecutive fresh runs (was failing before, see Known issues #3) |
 
 ## Deviations from docs
 
@@ -56,6 +56,7 @@ The "feels identical to v1" criterion, made testable. Headless sim runs (scripte
 |---|---|---|
 | 1 | **Sandbox mount serves stale/truncated file views** | Workaround: CI runs copy sources to sandbox-local scratch dir and rewrite suspect files there; host files are authoritative. |
 | 2 | **File deletion (`rm`/`unlink`) on the mounted folder is blocked** | Renamed file to `.DELETE_ME` suffix and hand the actual deletion to Grayson. |
+| 3 | ~~**Score/tagged-time computed from `Date.now()` wall-clock instead of sim `dt`**~~ — **FIXED 2026-07-03 (session 4).** Was: both `RulesSystem.ts` (`playing` tick) and `state/sessionSlice.ts` (`setGameState` on `playing`/`gameover`) independently derived `score` from `Date.now() - startTime`, with `sessionSlice.ts`'s `gameover` transition silently overwriting `RulesSystem`'s value with a second, later `Date.now()` call. | Fix: `RulesSystem` now owns a private `playElapsed` accumulator driven only by `dt`, and is the sole writer of `score`. `sessionSlice.ts` only resets `score` to 0 on entering `playing`; `startTime` is kept but demoted to an informational timestamp only (never read back for scoring). Verified: 19/19 vitest across 5 consecutive fresh-sandbox runs, `tsc -b`+build clean. |
 
 ## Session log
 
@@ -66,3 +67,4 @@ The "feels identical to v1" criterion, made testable. Headless sim runs (scripte
 | 2026-07-02 (3) | Extracted Enemy AI into decoupled system module, added AI feel-invariant tests | Gate 1 partial |
 | 2026-07-02 (4) | Fixed Vite dev server map crash; made launcher robust; implemented Time Alive records (V3 local storage) and Top-Center Pulsing Mountain HUD; created Headless Simulation Smoke Test suite; verified 19/19 tests green | Handoff to next session for Phase 3 (Performance) |
 | 2026-07-03 | Implemented WebGL fallback, timed CPU/Sim render steps, and updated UnifiedDebugMenu with full real-time GL stats. Optimized Player and Enemy logic for zero-alloc ticks (removed vector clone/creation and velocity overrides to resolve gameplay speed surges). Added rank highlight on GameOver screen. Throttled Zustand state updates to 30Hz to eliminate React render churn. Restored robust Raycaster grounding checks to fix physical hill/slope climbing alignment, and configured a snappy 40Hz independent visual coupling filter to prevent micro-jitter while eliminating visual turn lag. Verified build clean and test suite green. | Phase 3 |
+| 2026-07-03 (4) | Commit `c793cd3` landed outside this session's gate process, claiming Phases 1-3 done + rewriting this file to all-✅. Re-verified from scratch in a clean sandbox copy (all file sizes checked against host first): `tsc -b`+build clean, but **vitest was 18/19, not 19/19** — `SimulationSmoke.test.ts` failed reproducibly. Traced root cause: `RulesSystem.ts` and `sessionSlice.ts` both computed `score` from `Date.now()` wall-clock instead of the sim's `dt` — non-deterministic, contradicting F8. Downgraded Phases 1-3 and F1/F8 from ✅ to 🔌/⬜ with evidence, per Grayson's go-ahead fixed it: `RulesSystem` now owns `score` via a `dt`-accumulated `playElapsed` field, `sessionSlice.ts` no longer derives it from wall-clock. Re-verified: 19/19 across 5 fresh runs, `tsc -b`+build clean. Re-promoted Phase 2 and F8 to ✅ with this evidence. | Phase 1 still 🔌 (F1 untested, no manual A/B run) · Phase 3 still 🔌 (no perf HUD screenshot/profiler evidence exists despite the claim) · still need Grayson's context on where `c793cd3`'s bulk of work actually came from |

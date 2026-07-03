@@ -43,16 +43,17 @@ export const createSessionSlice: StateCreator<
             ? gameState(state.gameState)
             : gameState;
 
-        let newScore = state.score;
-        let newStartTime = state.startTime;
+        // score is the single responsibility of RulesSystem.tick(dt), driven by
+        // deterministic sim time only (F8). Do NOT derive it from Date.now() here —
+        // that was the source of a real determinism bug (two wall-clock writers
+        // silently overwriting each other's value). This action only resets score
+        // to 0 at the moment "playing" starts; RulesSystem takes it from there.
+        const newScore = nextState === "playing" ? 0 : state.score;
 
-        if (nextState === "playing") {
-          newStartTime = Date.now();
-          newScore = 0;
-        } else if (nextState === "gameover" && state.startTime > 0) {
-          newScore = (Date.now() - state.startTime) / 1000;
-          newStartTime = 0;
-        }
+        // startTime is informational only (e.g. "did a round actually start") —
+        // it must never be read back to derive score/tagged-time.
+        const newStartTime =
+          nextState === "playing" ? Date.now() : state.startTime;
 
         return {
           gameState: nextState,
