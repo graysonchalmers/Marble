@@ -12,6 +12,7 @@ export interface GameStore {
   // Gameplay
   jumpForce: number;
   moveSpeed: number;
+  playerTopSpeed: number;
   enemySpeed: number;
   enemySize: number;
   enemyMass: number;
@@ -105,6 +106,7 @@ const STORAGE_KEY = "MARBLE_GAME_SETTINGS_V2";
 const DEFAULT_SETTINGS = {
   jumpForce: 5,
   moveSpeed: 8,
+  playerTopSpeed: 20,
   enemySpeed: 2,
   enemySize: 0.9,
   enemyMass: 2.5,
@@ -115,7 +117,7 @@ const DEFAULT_SETTINGS = {
   cubeCount: 30,
   cubeScale: 7,
   soundEnabled: true,
-  physicsRate: 60,
+  physicsRate: 120,
   shadowsEnabled: true,
   pixelRatio: 1,
   cameraStiffness: 3,
@@ -131,6 +133,7 @@ const DEFAULT_SETTINGS = {
     environment: true,
     graphics: true,
     visuals: true,
+    audio: true,
   },
   groundGridSize: 176,
   groundColorBg: "#70b348",

@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo } from 'react'
 import * as THREE from 'three'
+import { WebGPURenderer } from 'three/webgpu'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Physics } from '@react-three/cannon'
 import { Environment, Text, GradientTexture } from '@react-three/drei'
@@ -65,20 +66,25 @@ function PerfBridge() {
     // We can access `gl.info.render.frame` etc.
     // Let's do a basic frame timer.
 
-    useFrame((state) => {
-        // Simple smoothing
-        const fps = 1 / state.clock.getDelta()
-        // GPU ms is hard to get accurately without extensions (which r3f-perf does).
-        // Let's just pass basic stats we can get easily or mock the GPU part if needed, 
-        // OR we just use `r3f-perf` in headless mode if possible?
-        // Actually, we can just rely on `state.gl.info.render.calls` etc.
+    const fpsSamples = useRef<number[]>([])
 
-        // For now, let's just push FPS. 
-        // We'll update only occasionally to avoid React thrashing
-        if (state.clock.elapsedTime % 0.5 < 0.05) {
+    useFrame((state) => {
+        const delta = state.clock.getDelta()
+        if (delta > 0) {
+            const currentFps = 1 / delta
+            fpsSamples.current.push(currentFps)
+            if (fpsSamples.current.length > 30) {
+                fpsSamples.current.shift()
+            }
+        }
+
+        // Update store occasionally
+        if (state.clock.elapsedTime % 0.5 < 0.02 && fpsSamples.current.length > 0) {
+            const avgFps = fpsSamples.current.reduce((a, b) => a + b, 0) / fpsSamples.current.length
+            
             useGameStore.setState({
                 perfStats: {
-                    fps: Math.round(fps),
+                    fps: Math.round(avgFps),
                     cpu: 0, 
                     gpu: 0  
                 }
@@ -148,7 +154,20 @@ function SceneInner() {
     const contactMat = useMemo(() => ({ friction, restitution }), [friction, restitution])
 
     return (
-        <Canvas shadows={shadowsEnabled} dpr={pixelRatio} camera={{ position: [0, 5, 10], fov: 50 }}>
+        <Canvas 
+            shadows={shadowsEnabled} 
+            dpr={pixelRatio} 
+            camera={{ position: [0, 5, 10], fov: 50 }}
+            gl={async (props) => {
+                const renderer = new WebGPURenderer({ 
+                    canvas: props.canvas as any, 
+                    antialias: false, 
+                    powerPreference: 'high-performance' 
+                })
+                await renderer.init()
+                return renderer
+            }}
+        >
             <GameLogic playerPos={playerPosRef} enemyPos={enemyPosRef} />
             <PerfBridge />
             {/* Visuals */}
@@ -212,10 +231,6 @@ function SceneInner() {
 
             <VectorIndicator playerPos={playerPosRef} enemyPos={enemyPosRef} />
             <CameraOcclusion playerPos={playerPosRef} />
-
-
-
-
 
         </Canvas>
     )

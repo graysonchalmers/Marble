@@ -109,7 +109,7 @@ export function CameraOcclusion({ playerPos }: {
                 }
             }
             // Limit max occlusion to prevent perf tanking
-            if (newGhosts.length >= 5) break
+            if (newGhosts.length >= 20) break
         }
 
         // 3. Restore NON-blocking instances

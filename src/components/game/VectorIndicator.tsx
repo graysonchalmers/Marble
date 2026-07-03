@@ -2,6 +2,8 @@ import { useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
+const OFFSET = new THREE.Vector3(0, 1.5, 0)
+
 export function VectorIndicator({ playerPos, enemyPos }: {
     playerPos: React.MutableRefObject<THREE.Vector3>,
     enemyPos: React.MutableRefObject<THREE.Vector3>
@@ -12,7 +14,7 @@ export function VectorIndicator({ playerPos, enemyPos }: {
         if (!groupRef.current || !playerPos.current || !enemyPos.current) return
 
         // Position slightly above the player
-        groupRef.current.position.copy(playerPos.current).add(new THREE.Vector3(0, 1.5, 0))
+        groupRef.current.position.copy(playerPos.current).add(OFFSET)
 
         // Look at enemy
         groupRef.current.lookAt(enemyPos.current)

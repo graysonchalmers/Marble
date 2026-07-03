@@ -16,6 +16,7 @@ export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefOb
     const cameraOffset = useGameStore(s => s.cameraOffset)
     const gameState = useGameStore(s => s.gameState)
     const playerAirControl = useGameStore(s => s.playerAirControl)
+    const playerTopSpeed = useGameStore(s => s.playerTopSpeed)
 
     const [ref, api] = useSphere(() => ({
         mass: 1,
@@ -30,7 +31,7 @@ export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefOb
     const { camera, scene } = useThree()
 
     // Input state
-    const [keys, setKeys] = useState({ w: false, a: false, s: false, d: false, space: false })
+    const [keys, setKeys] = useState({ w: false, a: false, s: false, d: false, space: false, shift: false })
     const lastInputTime = useRef(Date.now())
 
     useEffect(() => {
@@ -43,6 +44,7 @@ export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefOb
                 case 'a': case 'arrowleft': setKeys(k => ({ ...k, a: true })); break;
                 case 'd': case 'arrowright': setKeys(k => ({ ...k, d: true })); break;
                 case ' ': setKeys(k => ({ ...k, space: true })); break;
+                case 'shift': setKeys(k => ({ ...k, shift: true })); break;
             }
         }
         const handleKeyUp = (e: KeyboardEvent) => {
@@ -53,6 +55,7 @@ export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefOb
                 case 'a': case 'arrowleft': setKeys(k => ({ ...k, a: false })); break;
                 case 'd': case 'arrowright': setKeys(k => ({ ...k, d: false })); break;
                 case ' ': setKeys(k => ({ ...k, space: false })); break;
+                case 'shift': setKeys(k => ({ ...k, shift: false })); break;
             }
         }
         window.addEventListener('keydown', handleKeyDown)
@@ -117,6 +120,17 @@ export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefOb
     // Track last good velocity for hitch recovery
     const lastGoodVelocity = useRef([0, 0, 0])
 
+    // Preallocated vectors to prevent GC during frame updates
+    const tempPos = useRef(new THREE.Vector3())
+    const tempGroundPos = useRef(new THREE.Vector3())
+    const tempOffset = useRef(new THREE.Vector3())
+    const tempTargetCamPos = useRef(new THREE.Vector3())
+    
+    // Optimization: Cache ground objects
+    const cachedGround = useRef<THREE.Object3D[]>([])
+    const lastCacheUpdate = useRef(0)
+    const CACHE_UPDATE_INTERVAL = 2.0
+
     // Movement Logic
     useFrame((_state, delta) => {
         // PHYSICS HITCH FIX: Clamp delta to prevent instability during frame drops
@@ -161,12 +175,15 @@ export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefOb
 
         // Calculate Torque
         const torqueAmount = moveSpeed
-        const torque = new THREE.Vector3(0, 0, 0)
+        const torque = tempOffset.current.set(0, 0, 0)
 
-        if (keys.w) torque.x -= torqueAmount
-        if (keys.s) torque.x += torqueAmount
-        if (keys.a) torque.z += torqueAmount
-        if (keys.d) torque.z -= torqueAmount
+        // Only allow movement input if handbrake is not active
+        if (!keys.shift) {
+            if (keys.w) torque.x -= torqueAmount
+            if (keys.s) torque.x += torqueAmount
+            if (keys.a) torque.z += torqueAmount
+            if (keys.d) torque.z -= torqueAmount
+        }
 
         // Direction change boost: If trying to move against current momentum, boost torque
         // This helps the player "brake" and change direction more easily
@@ -194,19 +211,22 @@ export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefOb
         }
 
         // Ground check for air control (run every frame)
-        const groundCheckPos = new THREE.Vector3()
-        ref.current.getWorldPosition(groundCheckPos)
-        raycaster.current.set(groundCheckPos, downVector.current)
+        ref.current.getWorldPosition(tempGroundPos.current)
+        raycaster.current.set(tempGroundPos.current, downVector.current)
         raycaster.current.far = 1.0
 
-        const objectsToCheck: THREE.Object3D[] = []
-        scene.traverse((obj) => {
-            if (obj.userData && obj.userData.isGround) {
-                objectsToCheck.push(obj)
-            }
-        })
+        if (_state.clock.elapsedTime - lastCacheUpdate.current > CACHE_UPDATE_INTERVAL) {
+            const ground: THREE.Object3D[] = []
+            scene.traverse((obj) => {
+                if (obj.userData && obj.userData.isGround) {
+                    ground.push(obj)
+                }
+            })
+            cachedGround.current = ground
+            lastCacheUpdate.current = _state.clock.elapsedTime
+        }
 
-        const intersects = raycaster.current.intersectObjects(objectsToCheck, false)
+        const intersects = raycaster.current.intersectObjects(cachedGround.current, false)
         isGrounded.current = false
         // Ground Buffer: increased buffer from 0.6 to 1.2 for "sticky" feel
         for (const hit of intersects) {
@@ -220,93 +240,96 @@ export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefOb
         const controlMultiplier = isGrounded.current ? 1.0 : playerAirControl
         torque.multiplyScalar(controlMultiplier)
 
-        // BRAKING LOGIC
-        // If no input, apply counter-torque to stop faster
-        if (torque.lengthSq() === 0 && isGrounded.current) {
-            const currentAngVel = new THREE.Vector3(angularVelocity.current[0], angularVelocity.current[1], angularVelocity.current[2])
-            // Apply opposing torque
-            if (currentAngVel.length() > 0.1) {
-                const brakeForce = 2.0 // Braking strength
+        // INTERPOLATION FIX: Predict position between physics steps
+        const vel = velocity.current
+        
+        // TOP SPEED CLAMPING 
+        const currentSpeed = Math.sqrt(vel[0] * vel[0] + vel[2] * vel[2]) // Horizontal speed only
+        
+        // Dynamic Damping - Exponentially reduce torque as we approach top speed
+        if (currentSpeed > playerTopSpeed * 0.8 && torque.lengthSq() > 0 && !keys.shift) {
+            const currentDir = new THREE.Vector3(vel[0], 0, vel[2]).normalize()
+            const torqueDir = torque.clone().normalize()
+            const torqueAlignment = torqueDir.dot(currentDir)
+            
+            if (torqueAlignment > 0) {
+                const overSpeedPerc = Math.max(0, (currentSpeed - (playerTopSpeed * 0.8)) / (playerTopSpeed * 0.2))
+                torque.multiplyScalar(Math.max(0, 1.0 - overSpeedPerc))
+            }
+        }
+
+        const currentAngVel = new THREE.Vector3(angularVelocity.current[0], angularVelocity.current[1], angularVelocity.current[2])
+
+        // BRAKING LOGIC (Handbrake OR No-Input Coasting)
+        if (isGrounded.current && currentAngVel.length() > 0.1) {
+            if (keys.shift) {
+                const brakeForce = 15.0 // Very strong braking
                 torque.x = -currentAngVel.x * brakeForce
                 torque.z = -currentAngVel.z * brakeForce
-
-                // Allow braking torque to be applied
-                // (normally we wouldn't apply if torque is 0, but here we set it)
+                
+                if (currentSpeed > 0.1) {
+                    api.applyImpulse([-vel[0] * 0.2, 0, -vel[2] * 0.2], [0, 0, 0])
+                }
+            } 
+            else if (torque.lengthSq() === 0) {
+                const brakeForce = 2.0 // Gentle coasting brake
+                torque.x = -currentAngVel.x * brakeForce
+                torque.z = -currentAngVel.z * brakeForce
             }
         }
 
         api.applyTorque([torque.x, torque.y, torque.z])
 
-        // Jump Logic - now uses already-computed isGrounded.current
+        // Jump Logic
         if (keys.space && canJump.current && isGrounded.current) {
-            const pos = new THREE.Vector3()
-            ref.current.getWorldPosition(pos)
-
+            ref.current.getWorldPosition(tempPos.current)
             api.applyImpulse([0, jumpForce, 0], [0, 0, 0])
-            spawnParticles(pos.clone().add(new THREE.Vector3(0, -0.5, 0)))
-
+            spawnParticles(tempPos.current.clone().add(new THREE.Vector3(0, -0.5, 0)))
             canJump.current = false
             setTimeout(() => { canJump.current = true }, 500)
         }
 
-        // Particle Update (Imperative)
+        // Particle Update
         if (particleMeshRef.current) {
             let activeCount = 0
             let writeIdx = 0
-
             for (let i = 0; i < particlesRef.current.length; i++) {
                 const p = particlesRef.current[i]
                 p.life -= delta
                 if (p.life > 0) {
-                    // Physics
-                    p.vel.y -= 9.8 * delta // Gravity
+                    p.vel.y -= 9.8 * delta
                     p.pos.addScaledVector(p.vel, delta)
-
-                    // Update Instance
                     dummy.position.copy(p.pos)
-                    // Scale down as life fades
                     dummy.scale.setScalar(p.life)
                     dummy.updateMatrix()
                     particleMeshRef.current.setMatrixAt(writeIdx, dummy.matrix)
-
-                    // Keep in array
                     particlesRef.current[writeIdx] = p
                     writeIdx++
                     activeCount++
                 }
             }
-
-            // Trim dead particles
             particlesRef.current.length = activeCount
-
             particleMeshRef.current.count = activeCount
             particleMeshRef.current.instanceMatrix.needsUpdate = true
         }
 
-        // Camera follow logic (frame-rate independent with velocity interpolation)
-        const pos = new THREE.Vector3()
-        ref.current.getWorldPosition(pos)
+        // Camera follow logic
+        ref.current.getWorldPosition(tempPos.current)
 
         // Reset if fell off world
-        if (pos.y < -20) {
+        if (tempPos.current.y < -20) {
             api.position.set(0, 5, 0)
             api.velocity.set(0, 0, 0)
             api.angularVelocity.set(0, 0, 0)
             smoothedCamTarget.current.set(0, 5, 0)
         }
 
-        // INTERPOLATION FIX: Predict position between physics steps
-        // At high speeds, physics updates discretely but we render more often
-        // Use velocity to predict where ball will be this frame
-        const vel = velocity.current
         const speed = Math.sqrt(vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2])
 
-        // Only interpolate at meaningful speeds (avoids jitter at rest)
-        let interpolatedPos = pos.clone()
+        // Visual Interpolation
+        let interpolatedPos = tempPos.current.clone()
         if (speed > 0.5) {
-            // Predict forward by a fraction of the physics timestep
-            // This compensates for the render happening between physics ticks
-            const predictionFactor = 0.5 // Half a frame ahead
+            const predictionFactor = 0.5
             const predictOffset = new THREE.Vector3(
                 vel[0] * delta * predictionFactor,
                 vel[1] * delta * predictionFactor,
@@ -315,29 +338,19 @@ export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefOb
             interpolatedPos.add(predictOffset)
         }
 
-        // Frame-rate independent exponential smoothing
-        // Tighter delta clamp for smoother camera at high speeds
-        const cameraDelta = Math.min(clampedDelta, 0.033) // Cap at 33ms (30 FPS min)
-
-        // Exponential decay: alpha = 1 - e^(-stiffness * dt)
+        const cameraDelta = Math.min(clampedDelta, 0.033)
         const smoothFactor = 1 - Math.exp(-cameraStiffness * cameraDelta)
-
-        // Adaptive smoothing: reduce jitter at high speeds
         const velocityMagnitude = Math.sqrt(vel[0] * vel[0] + vel[1] * vel[1] + vel[2] * vel[2])
         const adaptiveFactor = smoothFactor * (1 + Math.min(velocityMagnitude / 20, 0.5))
 
-        // Smooth toward interpolated position (not raw physics position)
         smoothedCamTarget.current.lerp(interpolatedPos, adaptiveFactor * 2)
+        tempOffset.current.set(0, cameraOffset * 0.5, cameraOffset)
+        tempTargetCamPos.current.copy(smoothedCamTarget.current).add(tempOffset.current)
 
-        // Calculate camera target position from smoothed position
-        const offset = new THREE.Vector3(0, cameraOffset * 0.5, cameraOffset)
-        const targetCamPos = smoothedCamTarget.current.clone().add(offset)
-
-        // Smooth camera toward target with adaptive factor
-        camera.position.lerp(targetCamPos, adaptiveFactor)
+        camera.position.lerp(tempTargetCamPos.current, adaptiveFactor)
         camera.lookAt(smoothedCamTarget.current)
 
-        // Light follow logic
+        // Light follow
         if (lightRef.current && lightTarget.current) {
             lightRef.current.position.set(interpolatedPos.x + 10, interpolatedPos.y + 20, interpolatedPos.z + 5)
             lightTarget.current.position.copy(interpolatedPos)
@@ -346,20 +359,11 @@ export function PlayerSphere({ positionRef }: { positionRef?: React.MutableRefOb
             lightTarget.current.updateMatrixWorld()
         }
 
-        // BALL VISUAL INTERPOLATION
-        // Smooth ball position and rotation for render
-        smoothedBallPos.current.lerp(interpolatedPos, smoothFactor * 3) // Track faster than camera
+        // Ball visual lerp - Increased Snappiness
+        smoothedBallPos.current.lerp(interpolatedPos, smoothFactor * 6)
+        const targetQuat = new THREE.Quaternion(...physicsQuat.current)
+        smoothedBallQuat.current.slerp(targetQuat, smoothFactor * 6)
 
-        // Smooth quaternion toward physics quaternion
-        const targetQuat = new THREE.Quaternion(
-            physicsQuat.current[0],
-            physicsQuat.current[1],
-            physicsQuat.current[2],
-            physicsQuat.current[3]
-        )
-        smoothedBallQuat.current.slerp(targetQuat, smoothFactor * 3)
-
-        // Apply to visual mesh
         if (visualMeshRef.current) {
             visualMeshRef.current.position.copy(smoothedBallPos.current)
             visualMeshRef.current.quaternion.copy(smoothedBallQuat.current)

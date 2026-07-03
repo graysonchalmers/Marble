@@ -151,6 +151,7 @@ export function SettingsMenu() {
     const {
         jumpForce, setJumpForce,
         moveSpeed, setMoveSpeed,
+        playerTopSpeed, setPlayerTopSpeed,
         enemySpeed, setEnemySpeed,
         enemySize, setEnemySize,
         enemyMass, setEnemyMass,
@@ -237,6 +238,7 @@ export function SettingsMenu() {
                         onToggle={() => setSectionState('gameplay', !sectionStates['gameplay'])}
                     >
                         <Slider label="Move Speed" value={moveSpeed} onChange={setMoveSpeed} min={1} max={30} step={0.5} color={COLORS.primary} />
+                        <Slider label="Top Speed" value={playerTopSpeed} onChange={setPlayerTopSpeed} min={5} max={100} step={1} color={COLORS.primary} />
                         <Slider label="Jump Force" value={jumpForce} onChange={setJumpForce} min={1} max={30} step={0.5} color={COLORS.primary} />
                         <Slider label="Player Air Control" value={playerAirControl} onChange={setPlayerAirControl} min={0} max={1} step={0.05} color={COLORS.primary} />
                         <div style={{ height: '10px' }} />
@@ -354,7 +356,9 @@ export function SettingsMenu() {
                     >
                         <Slider label="Cam Stiffness" value={cameraStiffness} onChange={setCameraStiffness} min={1} max={50} step={1} color={COLORS.light} />
                         <Slider label="Cam Distance" value={cameraOffset} onChange={setCameraOffset} min={2} max={50} step={1} color={COLORS.light} />
+
                         <div style={{ height: '10px' }} />
+                        <div className="section-subtitle">Render Pipeline</div>
                         <Toggle label="Shadows" value={shadowsEnabled} onChange={setShadowsEnabled} />
                         <Slider label="Resolution Scale" value={pixelRatio} onChange={setPixelRatio} min={0.25} max={2} step={0.25} color={COLORS.light} />
                     </CollapsibleSection>
