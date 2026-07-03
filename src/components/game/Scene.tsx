@@ -11,65 +11,91 @@ import { VectorIndicator } from './VectorIndicator'
 import { CameraOcclusion } from './CameraOcclusion'
 import { useGameStore } from '../../store/useGameStore'
 import { soundManager } from '../../audio/SoundManager'
+import { GameLoop } from '../../engine/loop'
+import { rulesSystem } from '../../systems/rules/RulesSystem'
+import { SonarSystem } from '../../systems/sonar/SonarSystem'
 
-// Logic component that runs inside Canvas
-function GameLogic({ playerPos, enemyPos }: { playerPos: React.MutableRefObject<THREE.Vector3>, enemyPos: React.MutableRefObject<THREE.Vector3> }) {
+// Shared variables for instrumentation
+let lastSimMs = 0
+let lastRenderMs = 0
+
+// Logic component that drives the game loop and sound listener inside Canvas
+function GameLoopDriver({ playerPos, enemyPos, setShowGo }: {
+    playerPos: React.MutableRefObject<THREE.Vector3>,
+    enemyPos: React.MutableRefObject<THREE.Vector3>,
+    setShowGo: React.Dispatch<React.SetStateAction<boolean>>
+}) {
     const gameState = useGameStore(s => s.gameState)
+    const isPaused = useGameStore(s => s.isPaused)
 
-    // Audio Frame Update
-    const lastDistRef = useRef(0)
-    const throttleRef = useRef(0)
+    // Instantiate systems once
+    const loop = useMemo(() => new GameLoop({ simRate: 60 }), [])
+    const sonarSystem = useMemo(() => new SonarSystem(playerPos, enemyPos), [playerPos, enemyPos])
 
-    useFrame((_state, delta) => {
-        if (gameState !== 'playing' || !playerPos.current || !enemyPos.current) return
+    // Register ticks once
+    useEffect(() => {
+        const tickRules = (dt: number) => rulesSystem.tick(dt)
+        const tickSonar = (dt: number) => sonarSystem.tick(dt)
 
-        const dist = playerPos.current.distanceTo(enemyPos.current)
-        // Closing speed: Positive if distance decreased (getting closer)
-        const closingSpeed = -(dist - lastDistRef.current) / delta
+        loop.addTick(tickRules)
+        loop.addTick(tickSonar)
 
-        soundManager.updateSonar(dist, closingSpeed, useGameStore.getState())
+        return () => {
+            loop.removeTick(tickRules)
+            loop.removeTick(tickSonar)
+            loop.stop()
+        }
+    }, [loop, sonarSystem])
+
+    // Manage Sonar start/stop reactively
+    useEffect(() => {
+        if (gameState === 'playing' && !isPaused) {
+            soundManager.startSonar()
+        } else {
+            soundManager.stopSonar()
+        }
+        return () => soundManager.stopSonar()
+    }, [gameState, isPaused])
+
+    // Monitor transition from countdown to playing to show the "GO!" text
+    const lastStateRef = useRef(gameState)
+    useEffect(() => {
+        if (lastStateRef.current === 'countdown' && gameState === 'playing') {
+            setShowGo(true)
+            const timer = setTimeout(() => setShowGo(false), 1000)
+            return () => clearTimeout(timer)
+        }
+        lastStateRef.current = gameState
+    }, [gameState, setShowGo])
+
+    // Reset loop state when countdown or setup triggers
+    useEffect(() => {
+        if (gameState === 'setup' || gameState === 'countdown') {
+            loop.reset()
+            rulesSystem.reset()
+            sonarSystem.reset()
+        }
+    }, [gameState, loop, sonarSystem])
+
+    useFrame((state, delta) => {
+        // Tick fixed game loop systems
+        const start = performance.now()
+        loop.advance(delta)
+        lastSimMs = performance.now() - start
 
         // Update audio listener position/orientation
-        soundManager.updateListener(_state.camera)
-
-        // Throttle UI updates to ~5Hz (every 0.2s)
-
-        throttleRef.current += delta
-        if (throttleRef.current > 0.2) {
-            useGameStore.setState({ debugVelocity: closingSpeed })
-            throttleRef.current = 0
+        if (gameState === 'playing') {
+            soundManager.updateListener(state.camera)
         }
-
-        lastDistRef.current = dist
     })
 
     return null
 }
 
 function PerfBridge() {
-    // usePerf hook provides access to the GL performance data from r3f-perf
-    // Note: this hook usually returns { log, gl, ... }
-    // but r3f-perf documentation/types can vary. 
-    // If getting raw numbers is hard, we can assume typical r3f-perf behavior
-    // or just assume we want to pull gl.info.render logic?
-    // Actually, r3f-perf exposes `getReport` or we can access the `gl` stats if we don't use 'headless' mode.
-    // BUT the simplest way if usePerf isn't just giving us 'fps' as a value is to use our own frame loop? 
-    // Wait, r3f-perf is a *visual* tool mostly. 
-    // Let's use `useThree` to get gl info + simple FPS counter if we want "Render MS".
-    // 
-    // Actually, let's keep it simple. `r3f-perf` doesn't easily "export" the numbers to React state without some hacking.
-    // Better idea: We'll implement a lightweight FPS/MS tracker here ourselves to pump into the Context.
-    // It's cleaner than trying to scrape DOM or hack the library.
-
-    // BUT user asked to "Combine the dev tools and the perf monitor. I want the milliseconds of the GPU stuff to be rendering inside of that DevTools thing."
-    // `r3f-perf` uses `gl.info` and some extensions for GPU.
-    // We can access `gl.info.render.frame` etc.
-    // Let's do a basic frame timer.
-
     const fpsSamples = useRef<number[]>([])
 
-    useFrame((state) => {
-        const delta = state.clock.getDelta()
+    useFrame((state, delta) => {
         if (delta > 0) {
             const currentFps = 1 / delta
             fpsSamples.current.push(currentFps)
@@ -78,15 +104,24 @@ function PerfBridge() {
             }
         }
 
-        // Update store occasionally
+        // Update store occasionally (every 0.5s)
         if (state.clock.elapsedTime % 0.5 < 0.02 && fpsSamples.current.length > 0) {
             const avgFps = fpsSamples.current.reduce((a, b) => a + b, 0) / fpsSamples.current.length
+            const gl = state.gl
+            
+            // Safe JS Heap check (Chrome only)
+            const mem = (performance as any).memory ? (performance as any).memory.usedJSHeapSize / (1024 * 1024) : 0
             
             useGameStore.setState({
                 perfStats: {
                     fps: Math.round(avgFps),
-                    cpu: 0, 
-                    gpu: 0  
+                    simMs: parseFloat(lastSimMs.toFixed(2)),
+                    renderMs: parseFloat(lastRenderMs.toFixed(2)),
+                    drawCalls: gl.info.render.calls,
+                    triangles: gl.info.render.triangles,
+                    geometries: gl.info.memory.geometries,
+                    textures: gl.info.memory.textures,
+                    memory: Math.round(mem * 10) / 10
                 }
             })
         }
@@ -99,7 +134,6 @@ function SceneInner() {
     const gameState = useGameStore(s => s.gameState)
     const setGameState = useGameStore(s => s.setGameState)
     const countdownValue = useGameStore(s => s.countdownValue)
-    const setCountdownValue = useGameStore(s => s.setCountdownValue)
     const gravity = useGameStore(s => s.gravity)
     const friction = useGameStore(s => s.friction)
     const restitution = useGameStore(s => s.restitution)
@@ -116,37 +150,12 @@ function SceneInner() {
 
     const [showGo, setShowGo] = useState(false)
 
-    // Countdown Logic
+    // Countdown Logic (only for start to setup transition)
     useEffect(() => {
         if (gameState === 'start') {
             setGameState('setup')
         }
     }, [gameState, setGameState])
-
-    useEffect(() => {
-        if (gameState === 'countdown' && countdownValue > 0) {
-            soundManager.playCountdownBeep(countdownValue)
-            const timer = setTimeout(() => {
-                setCountdownValue(countdownValue - 1)
-            }, 1000)
-            return () => clearTimeout(timer)
-        } else if (gameState === 'countdown' && countdownValue === 0) {
-            soundManager.playGoSignal()
-            setShowGo(true)
-            setGameState('playing')
-            setTimeout(() => setShowGo(false), 1000)
-        }
-    }, [gameState, countdownValue, setCountdownValue, setGameState])
-
-    // Sonar Logic
-    useEffect(() => {
-        if (gameState === 'playing' && !isPaused) {
-            soundManager.startSonar()
-        } else {
-            soundManager.stopSonar()
-        }
-        return () => soundManager.stopSonar()
-    }, [gameState, isPaused])
 
     // Memoize physics props to prevent world reset
     // World Scale affects gravity: higher scale = stronger gravity (snappy/toy), lower = weaker (heavy/giant)
@@ -159,16 +168,35 @@ function SceneInner() {
             dpr={pixelRatio} 
             camera={{ position: [0, 5, 10], fov: 50 }}
             gl={async (props) => {
-                const renderer = new WebGPURenderer({ 
-                    canvas: props.canvas as any, 
-                    antialias: false, 
-                    powerPreference: 'high-performance' 
-                })
-                await renderer.init()
+                let renderer;
+                try {
+                    renderer = new WebGPURenderer({ 
+                        canvas: props.canvas as any, 
+                        antialias: false, 
+                        powerPreference: 'high-performance' 
+                    })
+                    await renderer.init()
+                } catch (e) {
+                    console.warn('WebGPURenderer failed to initialize, falling back to WebGLRenderer:', e)
+                    renderer = new THREE.WebGLRenderer({
+                        canvas: props.canvas,
+                        antialias: false,
+                        powerPreference: 'high-performance'
+                    })
+                }
+
+                // Override render function to measure CPU render time
+                const originalRender = renderer.render;
+                renderer.render = function(scene: any, camera: any) {
+                    const start = performance.now()
+                    originalRender.call(this, scene, camera)
+                    lastRenderMs = performance.now() - start
+                }
+
                 return renderer
             }}
         >
-            <GameLogic playerPos={playerPosRef} enemyPos={enemyPosRef} />
+            <GameLoopDriver playerPos={playerPosRef} enemyPos={enemyPosRef} setShowGo={setShowGo} />
             <PerfBridge />
             {/* Visuals */}
 

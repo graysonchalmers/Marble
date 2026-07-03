@@ -802,3 +802,145 @@ canvas {
 .current-version .changelog-items li {
   color: #ddd;
 }
+
+/* HUD Timer styles */
+.big-timer-container {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: "JetBrains Mono", monospace;
+  pointer-events: none;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  text-shadow: 0 4px 15px rgba(0, 0, 0, 0.9);
+  animation: slideInDown 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.big-timer-mountain {
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.big-timer-value {
+  font-size: 3.5rem;
+  font-weight: 800;
+  color: #ffffff;
+  line-height: 1;
+  letter-spacing: -1.5px;
+  filter: drop-shadow(0 2px 8px rgba(255, 255, 255, 0.15));
+  display: flex;
+  align-items: baseline;
+}
+
+.big-timer-value span {
+  font-size: 1.8rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.5);
+  margin-left: 2px;
+}
+
+.big-timer-best {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #ffcc00;
+  margin-top: 6px;
+  letter-spacing: 1px;
+  opacity: 0.8;
+}
+
+/* Personal records tables */
+.records-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 15px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.9rem;
+}
+
+.records-table th, .records-table td {
+  padding: 6px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.records-table th {
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+}
+
+.records-table td {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.records-table tr:hover td {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.new-pb-badge {
+  background: linear-gradient(45deg, #ffb300, #ff8f00);
+  color: #000000;
+  font-weight: 800;
+  font-size: 0.9rem;
+  padding: 6px 16px;
+  border-radius: 50px;
+  box-shadow: 0 4px 15px rgba(255, 143, 0, 0.4);
+  text-shadow: none;
+  animation: pulsePB 1.5s infinite alternate;
+  display: inline-block;
+  margin-top: 10px;
+  letter-spacing: 0.5px;
+}
+
+@keyframes pulsePB {
+  from {
+    transform: scale(1);
+    box-shadow: 0 4px 15px rgba(255, 143, 0, 0.3);
+  }
+  to {
+    transform: scale(1.05);
+    box-shadow: 0 6px 25px rgba(255, 143, 0, 0.6);
+  }
+}
+
+@keyframes timerPulse {
+  0% {
+    transform: scale(1);
+    color: #ffffff;
+    filter: drop-shadow(0 0 0px rgba(255, 204, 0, 0));
+  }
+  15% {
+    transform: scale(1.25);
+    color: #ffcc00;
+    filter: drop-shadow(0 0 25px #ffcc00);
+  }
+  100% {
+    transform: scale(1);
+    color: #ffffff;
+    filter: drop-shadow(0 2px 8px rgba(255, 255, 255, 0.15));
+  }
+}
+
+@keyframes slideInDown {
+  from {
+    transform: translate(-50%, -40px);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+

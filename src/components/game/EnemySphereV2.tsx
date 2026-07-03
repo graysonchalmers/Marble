@@ -55,6 +55,16 @@ export function EnemySphereV2({ playerPos, positionRef }: {
         velocity.current.set(v[0], v[1], v[2])
     }), [api.velocity])
 
+    useEffect(() => {
+        if (gameState === 'setup' || gameState === 'countdown') {
+            api.position.set(SPAWN_POS[0], SPAWN_POS[1], SPAWN_POS[2])
+            api.velocity.set(0, 0, 0)
+            api.angularVelocity.set(0, 0, 0)
+            aiState.current = createAIState()
+            setCurrentState('idle')
+        }
+    }, [gameState, api])
+
     // AI State
     const aiState = useRef<EnemyAIState>(createAIState())
     const [currentState, setCurrentState] = useState<EnemyState>('idle')
@@ -75,6 +85,7 @@ export function EnemySphereV2({ playerPos, positionRef }: {
     const avoidanceRaycaster = useRef(new THREE.Raycaster())
     const groundRaycaster = useRef(new THREE.Raycaster()) // Reuse for ground check
     const downVector = useRef(new THREE.Vector3(0, -1, 0))
+    const upVector = useRef(new THREE.Vector3(0, 1, 0))
     const isGrounded = useRef(true)
 
     // PREALLOCATED vectors to avoid GC pressure
@@ -95,7 +106,7 @@ export function EnemySphereV2({ playerPos, positionRef }: {
 
     // Throttle UI state updates even more
     const lastUIUpdate = useRef(0)
-    const UI_UPDATE_INTERVAL = 0.25 // Update UI state every 250ms (4Hz)
+    const UI_UPDATE_INTERVAL = 0.033 // Update UI state every 33ms (30Hz)
 
     // Store latest calculations to use between throttled updates
     const lastCanSee = useRef(false)
@@ -176,14 +187,15 @@ export function EnemySphereV2({ playerPos, positionRef }: {
 
             // Update Last Known Pos Visual via ref (no render)
             if (aiState.current.lastKnownPlayerPos) {
-                if (!lastKnownVisualRef.current || lastKnownVisualRef.current.distanceTo(aiState.current.lastKnownPlayerPos) > 0.5) {
-                    lastKnownVisualRef.current = aiState.current.lastKnownPlayerPos.clone()
+                if (!lastKnownVisualRef.current) {
+                    lastKnownVisualRef.current = new THREE.Vector3()
                 }
+                lastKnownVisualRef.current.copy(aiState.current.lastKnownPlayerPos)
             }
 
             // OBSTACLE AVOIDANCE CALCULATION (Throttled)
             // Cache the target for use in movement loop
-            cachedTarget.current.copy(getMovementTarget(aiState.current, position.current, tempVec1.current, playerVel.current))
+            getMovementTarget(aiState.current, position.current, tempVec1.current, playerVel.current, cachedTarget.current)
 
             // Avoidance direction calculation - REUSE tempVec3
             tempVec3.current.copy(cachedTarget.current).sub(position.current).normalize() // desiredDir
@@ -200,7 +212,7 @@ export function EnemySphereV2({ playerPos, positionRef }: {
 
             if (avoidIntersects.length > 0 && avoidIntersects[0].face) {
                 // Apply avoidance - rotate check dir and scale
-                tempVec2.current.copy(checkDir).applyAxisAngle(downVector.current.clone().negate(), Math.PI / 3)
+                tempVec2.current.copy(checkDir).applyAxisAngle(upVector.current, Math.PI / 3)
                 lastAvoidanceForce.current.add(tempVec2.current.multiplyScalar(20))
             }
 

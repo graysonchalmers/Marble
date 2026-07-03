@@ -88,6 +88,9 @@ Keep v1's tuned behavior (drone/pulse, closing/opening channels, pitch modulatio
 | Quality presets | Low/Med/High/Ultra: shadows, DPR, post, particle counts in one switch |
 | Instrumentation | Real frame budget HUD: sim ms / render ms / GC, using `performance.now()` brackets + `renderer.info` |
 | Physics | Keep cannon-es initially (parity first). Evaluate Rapier (WASM) in Phase 2 — ~5-10x faster, but re-tuning risk. Decision gate, not a default. |
+| Ground Checks | O(1) mathematical height calculation from heightfield formula instead of CPU raycasting against 4000-triangle mesh. |
+| Visual Coupling | Direct position and quaternion copy from physics to visual meshes to eliminate visual lag and resolve mushy controls. |
+| Zustand Throttling | Transient player/enemy state updates throttled to 30Hz inside subscriptions to eliminate React render churn. |
 
 ## 7. 🧪 Testing
 

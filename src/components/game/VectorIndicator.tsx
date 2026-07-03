@@ -5,8 +5,8 @@ import * as THREE from 'three'
 const OFFSET = new THREE.Vector3(0, 1.5, 0)
 
 export function VectorIndicator({ playerPos, enemyPos }: {
-    playerPos: React.MutableRefObject<THREE.Vector3>,
-    enemyPos: React.MutableRefObject<THREE.Vector3>
+    playerPos: { current: THREE.Vector3 },
+    enemyPos: { current: THREE.Vector3 }
 }) {
     const groupRef = useRef<THREE.Group>(null)
 

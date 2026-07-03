@@ -108,42 +108,133 @@ export const StartScreen: React.FC<{ onStart: () => void }> = ({ onStart }) => {
     )
 }
 
+const renderRecordsTable = (records: Array<{ date: string, timeAlive: number }>, currentScore?: number) => {
+    if (!records || records.length === 0) return null;
+
+    return (
+        <table className="records-table">
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Date</th>
+                    <th>Time</th>
+                </tr>
+            </thead>
+            <tbody>
+                {records.map((r, i) => {
+                    const isCurrentRun = currentScore !== undefined && Math.abs(r.timeAlive - currentScore) < 0.001;
+                    return (
+                        <tr 
+                            key={i} 
+                            style={isCurrentRun ? { 
+                                background: 'rgba(229, 57, 53, 0.15)', 
+                                borderLeft: '3px solid #ffcc00' 
+                            } : undefined}
+                        >
+                            <td style={{ 
+                                color: isCurrentRun ? '#ffcc00' : (i === 0 ? '#ffcc00' : 'rgba(255,255,255,0.4)'),
+                                fontWeight: isCurrentRun ? 'bold' : 'normal'
+                            }}>
+                                #{i + 1} {isCurrentRun && "(You)"}
+                            </td>
+                            <td style={{ fontWeight: isCurrentRun ? 'bold' : 'normal' }}>{r.date}</td>
+                            <td style={{ fontWeight: 'bold', color: isCurrentRun ? '#ffcc00' : 'white' }}>{r.timeAlive.toFixed(2)}s</td>
+                        </tr>
+                    );
+                })}
+            </tbody>
+        </table>
+    );
+};
+
 export const PauseScreen: React.FC = () => {
+    const score = useGameStore(s => s.score)
+    const personalRecords = useGameStore(s => s.personalRecords)
+
     return (
         <MenuOverlay
             title="Standing By"
-            subtitle="System Paused"
+            subtitle={
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div>System Paused</div>
+                    <div style={{ fontSize: '1.25rem', marginTop: '8px', color: '#ffcc00', fontWeight: 800 }}>
+                        Currently at: {score.toFixed(2)}s
+                    </div>
+                    <div style={{ fontSize: '0.95rem', marginTop: '4px', fontStyle: 'italic', color: 'rgba(255, 255, 255, 0.6)' }}>
+                        Keep climbing! 🏔️
+                    </div>
+                </div>
+            }
         >
-            <div className="pause-screen-text">
+            <div className="pause-screen-text" style={{ marginBottom: '10px' }}>
                 <span className="pause-screen-key">SPACE</span>
                 to Resume
             </div>
+
+            {personalRecords.length > 0 && (
+                <div style={{ marginTop: '20px', width: '100%', maxWidth: '320px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', alignSelf: 'flex-start', paddingLeft: '12px' }}>
+                        Personal Bests
+                    </div>
+                    {renderRecordsTable(personalRecords.slice(0, 3))}
+                </div>
+            )}
         </MenuOverlay>
     )
 }
 
 export const GameOverScreen: React.FC<{ score: number, onRestart: () => void }> = ({ score, onRestart }) => {
+    const isNewRecord = useGameStore(s => s.isNewRecord)
+    const personalRecords = useGameStore(s => s.personalRecords)
+
+    // Find the rank (1-indexed) in the full top records list
+    const currentRank = personalRecords.findIndex(r => Math.abs(r.timeAlive - score) < 0.001) + 1;
 
     return (
         <MenuOverlay
-            title="Tagged!"
+            title={isNewRecord ? "New Record!" : "Tagged!"}
             darken={true}
         >
-            <div className="game-over-panel">
+            <div className="game-over-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                 <div className="game-over-label">
                     Time on the Run
                 </div>
-                <div className="game-over-score">
-                    {score.toFixed(2)}<span style={{ fontSize: '1.5rem' }}>s</span>
+                <div className="game-over-score" style={{ color: isNewRecord ? '#ffcc00' : 'white' }}>
+                    {score.toFixed(2)}<span style={{ fontSize: '1.2rem' }}>s</span>
+                </div>
+                {currentRank > 0 ? (
+                    <div style={{ fontSize: '1.15rem', marginTop: '6px', color: '#ffcc00', fontWeight: 'bold', letterSpacing: '1px' }}>
+                        POSITION #{currentRank}
+                    </div>
+                ) : (
+                    <div style={{ fontSize: '0.95rem', marginTop: '6px', color: 'rgba(255, 255, 255, 0.4)' }}>
+                        Rank: Unranked (Top 10)
+                    </div>
+                )}
+                {isNewRecord && (
+                    <div className="new-pb-badge" style={{ marginTop: '12px' }}>
+                        ✨ NEW PERSONAL BEST! ✨
+                    </div>
+                )}
+            </div>
+
+            <div style={{ margin: '20px 0' }}>
+                <MenuButton variant="danger" onClick={onRestart}>
+                    Try Again
+                </MenuButton>
+                <div className="press-space-text" style={{ marginTop: '10px' }}>
+                    Press Space
                 </div>
             </div>
 
-            <MenuButton variant="danger" onClick={onRestart}>
-                Try Again
-            </MenuButton>
-            <div className="press-space-text">
-                Press Space
-            </div>
+            {personalRecords.length > 0 && (
+                <div style={{ marginTop: '25px', width: '100%', maxWidth: '340px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', alignSelf: 'flex-start', paddingLeft: '12px' }}>
+                        Top Runs
+                    </div>
+                    {renderRecordsTable(personalRecords.slice(0, 5), score)}
+                </div>
+            )}
         </MenuOverlay>
     )
 }

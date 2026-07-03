@@ -17,6 +17,10 @@ const SEARCH_DURATION = 5       // Seconds to search before giving up
 const VISION_DISTANCE = 25      // Units to detect player
 const WAYPOINT_REACH_DIST = 2   // Distance to consider waypoint reached
 
+// Scratch vectors to avoid allocations in updates
+const tempDir = new THREE.Vector3()
+const tempProjected = new THREE.Vector3()
+
 /**
  * Create initial AI state
  */
@@ -25,7 +29,12 @@ export function createAIState(): EnemyAIState {
         state: 'idle',
         stateTimer: 0,
         lastKnownPlayerPos: new THREE.Vector3(),
-        searchWaypoints: [],
+        searchWaypoints: [
+            new THREE.Vector3(),
+            new THREE.Vector3(),
+            new THREE.Vector3(),
+            new THREE.Vector3()
+        ],
         currentWaypointIndex: 0
     }
 }
@@ -43,25 +52,32 @@ export function canSeePlayer(
 }
 
 /**
- * Generate search waypoints around last known position
+ * Generate search waypoints with smart projection (in-place modification)
  */
-/**
- * Generate search waypoints with smart projection
- */
-function generateSearchWaypoints(lastKnownPos: THREE.Vector3, playerVel: THREE.Vector3): THREE.Vector3[] {
-    const waypoints: THREE.Vector3[] = []
+function generateSearchWaypoints(
+    waypoints: THREE.Vector3[],
+    lastKnownPos: THREE.Vector3,
+    playerVel: THREE.Vector3
+): void {
+    // Ensure we have exactly 4 waypoints, if not re-initialize them
+    while (waypoints.length < 4) {
+        waypoints.push(new THREE.Vector3())
+    }
 
     // 1. First waypoint: Extrapolate where player was going
     const speed = playerVel.length()
     const projectionDist = Math.min(speed * 2, 15) // Predict up to 2 seconds or 15 units
-    const projectedPos = lastKnownPos.clone().add(playerVel.clone().normalize().multiplyScalar(projectionDist))
+    
+    waypoints[0].copy(lastKnownPos)
+    if (speed > 0.0001) {
+        tempDir.copy(playerVel).normalize().multiplyScalar(projectionDist)
+        waypoints[0].add(tempDir)
+    }
 
     // Add jitter if speed is low, otherwise trust the velocity
     if (speed < 1) {
-        projectedPos.add(new THREE.Vector3((Math.random() - 0.5) * 5, 0, (Math.random() - 0.5) * 5))
+        waypoints[0].add(tempProjected.set((Math.random() - 0.5) * 5, 0, (Math.random() - 0.5) * 5))
     }
-
-    waypoints.push(projectedPos)
 
     // 2. Subsequent waypoints: Spiral out from projected pos
     const searchRadius = 15
@@ -69,14 +85,12 @@ function generateSearchWaypoints(lastKnownPos: THREE.Vector3, playerVel: THREE.V
 
     for (let i = 1; i < 4; i++) {
         const angle = i * angleStep + Math.random() * 1.0
-        waypoints.push(new THREE.Vector3(
+        waypoints[i].set(
             lastKnownPos.x + Math.cos(angle) * searchRadius,
             lastKnownPos.y,
             lastKnownPos.z + Math.sin(angle) * searchRadius
-        ))
+        )
     }
-
-    return waypoints
 }
 
 /**
@@ -106,7 +120,7 @@ export function updateAIState(
                 // If lost immediately, go to search instead of idle
                 ai.state = 'search'
                 ai.stateTimer = 0
-                ai.searchWaypoints = generateSearchWaypoints(ai.lastKnownPlayerPos, playerVel)
+                generateSearchWaypoints(ai.searchWaypoints, ai.lastKnownPlayerPos, playerVel)
             } else if (ai.stateTimer >= ALERT_DURATION) {
                 ai.state = 'chase'
                 ai.stateTimer = 0
@@ -120,7 +134,7 @@ export function updateAIState(
             } else {
                 ai.state = 'search'
                 ai.stateTimer = 0
-                ai.searchWaypoints = generateSearchWaypoints(ai.lastKnownPlayerPos, playerVel)
+                generateSearchWaypoints(ai.searchWaypoints, ai.lastKnownPlayerPos, playerVel)
                 ai.currentWaypointIndex = 0
             }
             break
@@ -134,7 +148,8 @@ export function updateAIState(
                 // NEVER GO IDLE - RESTART SEARCH
                 ai.stateTimer = 0
                 // Generate new waypoints from CURRENT position to keep searching effectively
-                ai.searchWaypoints = generateSearchWaypoints(ai.lastKnownPlayerPos, new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5))
+                tempDir.set(Math.random() - 0.5, 0, Math.random() - 0.5)
+                generateSearchWaypoints(ai.searchWaypoints, ai.lastKnownPlayerPos, tempDir)
                 ai.currentWaypointIndex = 0
             }
             break
@@ -157,29 +172,29 @@ export function getSpeedMultiplier(state: EnemyState): number {
 }
 
 /**
- * Get movement target based on current state
+ * Get movement target based on current state (writes output to outTarget)
  */
 export function getMovementTarget(
     ai: EnemyAIState,
     enemyPos: THREE.Vector3,
     playerPos: THREE.Vector3,
-    playerVel: THREE.Vector3
+    playerVel: THREE.Vector3,
+    outTarget: THREE.Vector3 = new THREE.Vector3()
 ): THREE.Vector3 {
     switch (ai.state) {
         case 'idle':
-            // Just return current pos to stop
-            return enemyPos
+            return outTarget.copy(enemyPos)
 
         case 'alert':
-            // Face player
-            return playerPos
+            return outTarget.copy(playerPos)
 
         case 'chase':
             // Predictive pursuit - Intercept!
             const dist = enemyPos.distanceTo(playerPos)
-            // Predict further ahead if far away
             const predictionTime = Math.min(dist / 15, 1.5)
-            return playerPos.clone().add(playerVel.clone().multiplyScalar(predictionTime))
+            outTarget.copy(playerPos)
+            tempDir.copy(playerVel).multiplyScalar(predictionTime)
+            return outTarget.add(tempDir)
 
         case 'search':
             // Move through waypoints
@@ -189,12 +204,12 @@ export function getMovementTarget(
                 if (enemyPos.distanceTo(wp) < WAYPOINT_REACH_DIST) {
                     ai.currentWaypointIndex = (ai.currentWaypointIndex + 1) % ai.searchWaypoints.length
                 }
-                return ai.searchWaypoints[ai.currentWaypointIndex]
+                return outTarget.copy(ai.searchWaypoints[ai.currentWaypointIndex])
             }
-            return ai.lastKnownPlayerPos
+            return outTarget.copy(ai.lastKnownPlayerPos)
 
         default:
-            return playerPos
+            return outTarget.copy(playerPos)
     }
 }
 

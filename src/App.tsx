@@ -16,7 +16,8 @@ function GameUI() {
     setGameState,
     countdownValue,
     restartGame,
-    score
+    score,
+    personalBest
   } = useGameStore()
 
   // Handle Escape to Pause
@@ -91,6 +92,23 @@ function GameUI() {
           </div>
           <div className="velocity-debug-label">
             {label}
+          </div>
+        </div>
+      )}
+
+      {/* Time Alive HUD Timer */}
+      {gameState === 'playing' && !isPaused && (
+        <div className="big-timer-container">
+          <div className="big-timer-mountain">🏔️ CLIMBING</div>
+          <div 
+            className="big-timer-value"
+            key={Math.floor(score / 10)}
+            style={{ animation: Math.floor(score) >= 10 ? 'timerPulse 0.8s cubic-bezier(0.25, 1, 0.5, 1)' : undefined }}
+          >
+            {score.toFixed(2)}<span>s</span>
+          </div>
+          <div className="big-timer-best">
+            BEST: {personalBest.toFixed(2)}s
           </div>
         </div>
       )}

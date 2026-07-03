@@ -196,7 +196,10 @@ export function SettingsMenu() {
         audioOpeningPitch, setAudioOpeningPitch,
         audioSolidDistance, setAudioSolidDistance,
         audioPitchModulation, setAudioPitchModulation,
-        uiAccentColor, setUiAccentColor
+        uiAccentColor, setUiAccentColor,
+        activePreset, loadPreset,
+        graphicsPreset, loadGraphicsPreset,
+        maxParticles, setMaxParticles
     } = proxy as any
 
     const fileInputRef = useRef<HTMLInputElement>(null)
@@ -237,6 +240,18 @@ export function SettingsMenu() {
                         isOpen={sectionStates['gameplay']}
                         onToggle={() => setSectionState('gameplay', !sectionStates['gameplay'])}
                     >
+                        <div style={{ marginBottom: '12px' }}>
+                            <span className="select-label">Tuning Preset</span>
+                            <select 
+                                value={activePreset} 
+                                onChange={(e) => loadPreset(e.target.value as any)} 
+                                className="select-input"
+                            >
+                                <option value="v2">V2 Balanced (Default)</option>
+                                <option value="v1">V1 Original (Tuned)</option>
+                                <option value="custom">Custom (Modified)</option>
+                            </select>
+                        </div>
                         <Slider label="Move Speed" value={moveSpeed} onChange={setMoveSpeed} min={1} max={30} step={0.5} color={COLORS.primary} />
                         <Slider label="Top Speed" value={playerTopSpeed} onChange={setPlayerTopSpeed} min={5} max={100} step={1} color={COLORS.primary} />
                         <Slider label="Jump Force" value={jumpForce} onChange={setJumpForce} min={1} max={30} step={0.5} color={COLORS.primary} />
@@ -359,8 +374,25 @@ export function SettingsMenu() {
 
                         <div style={{ height: '10px' }} />
                         <div className="section-subtitle">Render Pipeline</div>
+
+                        <div style={{ marginBottom: '12px' }}>
+                            <span className="select-label">Graphics Quality</span>
+                            <select 
+                                value={graphicsPreset} 
+                                onChange={(e) => loadGraphicsPreset(e.target.value as any)} 
+                                className="select-input"
+                            >
+                                <option value="low">Low (Fastest)</option>
+                                <option value="medium">Medium (Balanced)</option>
+                                <option value="high">High (High Quality)</option>
+                                <option value="ultra">Ultra (Maximum)</option>
+                                <option value="custom">Custom (Modified)</option>
+                            </select>
+                        </div>
+
                         <Toggle label="Shadows" value={shadowsEnabled} onChange={setShadowsEnabled} />
                         <Slider label="Resolution Scale" value={pixelRatio} onChange={setPixelRatio} min={0.25} max={2} step={0.25} color={COLORS.light} />
+                        <Slider label="Max Particles" value={maxParticles} onChange={setMaxParticles} min={0} max={500} step={10} color={COLORS.light} />
                     </CollapsibleSection>
 
                     <CollapsibleSection

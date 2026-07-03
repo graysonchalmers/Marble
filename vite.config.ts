@@ -5,4 +5,9 @@ import { viteSingleFile } from "vite-plugin-singlefile"
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), viteSingleFile()],
+  resolve: {
+    alias: {
+      'hls.js': 'hls.js/dist/hls.js'
+    }
+  }
 })

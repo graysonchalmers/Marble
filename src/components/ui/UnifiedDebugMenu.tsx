@@ -53,14 +53,33 @@ export function UnifiedDebugMenu() {
                             <span style={{ color: '#fff' }}>FPS</span>
                             <span style={{ color: perfStats.fps < 30 ? '#ff4444' : '#fff' }}>{perfStats.fps}</span>
                         </div>
-                        {/* 
-                           Note: true extraction of GPU ms requires r3f-perf or Gl usage.
-                           Currently placeholder or simple Delta if we implemented it in PerfBridge.
-                           We'll show what we have.
-                        */}
-                        <div className="debug-row" style={{ opacity: 0.5 }}>
-                            <span style={{ color: '#aaa' }}>GPU</span>
-                            <span>-- ms</span>
+                        <div className="debug-row">
+                            <span>Sim Tick</span>
+                            <span>{perfStats.simMs || 0} ms</span>
+                        </div>
+                        <div className="debug-row">
+                            <span>Render CPU</span>
+                            <span>{perfStats.renderMs || 0} ms</span>
+                        </div>
+                        <div className="debug-row">
+                            <span>Draw Calls</span>
+                            <span>{perfStats.drawCalls || 0}</span>
+                        </div>
+                        <div className="debug-row">
+                            <span>Triangles</span>
+                            <span>{perfStats.triangles || 0}</span>
+                        </div>
+                        <div className="debug-row">
+                            <span>Geometries</span>
+                            <span>{perfStats.geometries || 0}</span>
+                        </div>
+                        <div className="debug-row">
+                            <span>Textures</span>
+                            <span>{perfStats.textures || 0}</span>
+                        </div>
+                        <div className="debug-row">
+                            <span>JS Heap</span>
+                            <span>{perfStats.memory > 0 ? `${perfStats.memory} MB` : '--'}</span>
                         </div>
                     </div>
 
