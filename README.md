@@ -1,13 +1,13 @@
 # 🔵 Marble Game V2 — "Sonar Tag"
 
-> This folder is a **git worktree** on branch `v2`. The parent folder (`Game-Marble/`) holds the preserved v1 on `main` (tag `v1.0.0`). Both run side by side.
+> This is a standalone clone on branch `v2`, kept separate from OneDrive to avoid sync conflicts with `node_modules` and build output. v1 (tag `v1.0.0`, branch `main`) lives at `OneDrive\Projects - Personal\Game-Marble`.
 
 A 3D predator-prey game: you're a marble hunted by an AI sphere, and a **sonar audio system** — pitch and pulse encoding distance and closing speed — is your only radar.
 
 ## 🚀 Quickstart
 
 Double-click **`launch_v2.bat`** (installs deps on first run, serves on **:5174**).
-V1 lives one folder up via `launch_game.bat` (**:5173**). Run both for A/B comparison.
+V1 lives in the OneDrive folder via its own `launch_game.bat` (**:5173**). Run both for A/B comparison.
 
 ```bash
 npm install
