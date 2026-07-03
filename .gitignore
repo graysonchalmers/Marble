@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# v2 worktree lives inside the repo folder
+/v2
