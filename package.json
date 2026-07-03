@@ -1,7 +1,7 @@
 {
-  "name": "cryo-spicule",
+  "name": "marble-game",
   "private": true,
-  "version": "0.0.0",
+  "version": "2.0.0-dev",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -37,4 +37,3 @@
     "vite": "^7.2.4",
     "vite-plugin-singlefile": "^2.3.0"
   }
-}

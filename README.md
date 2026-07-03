@@ -1,43 +1,29 @@
-# Marble Game
+# 🔵 Marble Game V2 — "Sonar Tag"
 
-A 3D rolling sphere game built with React, TypeScript, Three.js (React Three Fiber), and Cannon.js (React Three Cannon).
+> This folder is a **git worktree** on branch `v2`. The parent folder (`Game-Marble/`) holds the preserved v1 on `main` (tag `v1.0.0`). Both run side by side.
 
-## controls
+A 3D predator-prey game: you're a marble hunted by an AI sphere, and a **sonar audio system** — pitch and pulse encoding distance and closing speed — is your only radar.
 
-- **WASD / Arrows**: Move the marble
-- **Space**: Jump
-- **Mouse**: Rotate camera
+## 🚀 Quickstart
 
-## Features
+Double-click **`launch_v2.bat`** (installs deps on first run, serves on **:5174**).
+V1 lives one folder up via `launch_game.bat` (**:5173**). Run both for A/B comparison.
 
-- Physics-based movement and collision
-- Procedural terrain generation
-- Dynamic day/night cycle
-- Interactive falling cubes
-- Custom physics settings (Gravity, Friction, Restitution, Jump Force)
-- Sound effects
+```bash
+npm install
+npm run dev -- --port 5174   # dev
+npm run build                # single-file production build
+npm run test                 # vitest (once Phase 0 lands)
+```
 
-## Development
+## 🎮 Controls
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-2. Run development server:
-   ```bash
-   npm run dev
-   ```
+- **WASD / Arrows** — move · **Space** — jump · **Mouse** — camera
 
-## Tech Stack
+## 📚 Docs
 
-- **Framework**: React + Vite
-- **Language**: TypeScript
-- **3D Engine**: Three.js (@react-three/fiber)
-- **Physics**: Cannon-es (@react-three/cannon)
-- **UI**: HTML overlays via @react-three/drei
-
-## Roadmap
-
-See the [Master Plan](/.gemini/antigravity/brain/55ba7e56-ed2a-413a-a6c9-e4b0f6e48196/master_plan.md) for future features and ideas.
-
-See [Smart Enemy AI Implementation Plan](/.gemini/antigravity/brain/1099debb-d882-4ff2-aabf-58b1e7bcfd15/implementation_plan.md) for the detailed spec of the upcoming AI update.
+| Doc | What |
+|-----|------|
+| [docs/PRD.md](docs/PRD.md) | Vision, pillars, scope, success criteria |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Target architecture: systems vs React, perf program |
+| [docs/PLAN.md](docs/PLAN.md) | Phased build plan with exit criteria |
