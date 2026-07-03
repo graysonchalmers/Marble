@@ -13,7 +13,7 @@ import {
     getStateVisuals,
     type EnemyAIState,
     type EnemyState
-} from './EnemyAI'
+} from '../../systems/ai/EnemyAI'
 
 export function EnemySphereV2({ playerPos, positionRef }: {
     playerPos: React.MutableRefObject<THREE.Vector3>,

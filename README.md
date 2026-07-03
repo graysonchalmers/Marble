@@ -13,7 +13,7 @@ V1 lives in the OneDrive folder via its own `launch_game.bat` (**:5173**). Run b
 npm install
 npm run dev -- --port 5174   # dev
 npm run build                # single-file production build
-npm run test                 # vitest (once Phase 0 lands)
+npm run test                 # vitest (8 tests — engine loop + event bus)
 ```
 
 ## 🎮 Controls
@@ -24,6 +24,8 @@ npm run test                 # vitest (once Phase 0 lands)
 
 | Doc | What |
 |-----|------|
+| [docs/STATUS.md](docs/STATUS.md) | **Start here every session** — living truth: open phase, gates, evidence, known issues |
 | [docs/PRD.md](docs/PRD.md) | Vision, pillars, scope, success criteria |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Target architecture: systems vs React, perf program |
-| [docs/PLAN.md](docs/PLAN.md) | Phased build plan with exit criteria |
+| [docs/PLAN.md](docs/PLAN.md) | Phased build plan with exit gates |
+| [docs/TUNING.md](docs/TUNING.md) | v1 earned tuning values (frozen reference — data, not code) |
