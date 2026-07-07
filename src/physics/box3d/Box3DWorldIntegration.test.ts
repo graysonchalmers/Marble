@@ -1,11 +1,18 @@
+/**
+ * Box3D headless integration tests — feel invariants run against the REAL
+ * gameplay simulation (systems/sim/MarbleSim), not a parallel re-implementation.
+ *
+ * Loads the actual compiled WASM bridge in Node, so these tests exercise the
+ * exact code path the game ships: MarbleSim.step() at FIXED_DT.
+ */
 import { describe, it, expect, vi } from 'vitest'
-import * as THREE from 'three'
 import fs from 'fs'
 import path from 'path'
 import { Box3DWorld } from './Box3DWorld'
 import { loadBox3DBridge, loadBox3DBridgeModule } from './box3dBridge'
 import { useGameStore } from '../../store/useGameStore'
-import { createAIState, updateAIState, getMovementTarget } from '../../systems/ai/EnemyAI'
+import { MarbleSim, type SimInput } from '../../systems/sim/MarbleSim'
+import { FIXED_DT } from '../../systems/sim/tuning'
 // @ts-expect-error - compiled JS module doesn't have TS declarations
 import createMarbleBox3DBridgeModule from '../../../public/box3d/box3d_bridge.js'
 
@@ -35,7 +42,6 @@ const mockFetch = vi.fn().mockImplementation(async (url: string) => {
             ok: true,
             status: 200,
             async arrayBuffer() {
-                // Return a copy of the buffer to avoid sharing underlying ArrayBuffer
                 return wasmBuffer.buffer.slice(
                     wasmBuffer.byteOffset,
                     wasmBuffer.byteOffset + wasmBuffer.byteLength
@@ -59,188 +65,112 @@ const globalObj = globalThis as any
 globalObj.window = globalThis
 globalObj.createMarbleBox3DBridgeModule = createMarbleBox3DBridgeModule
 
+const NO_INPUT: SimInput = { w: false, a: false, s: false, d: false, space: false, shift: false }
 
+async function bootWorld(): Promise<Box3DWorld> {
+    const status = await loadBox3DBridge()
+    expect(status.available).toBe(true)
+    const bridge = await loadBox3DBridgeModule()
+    expect(bridge.health()).toBe(1)
+    const world = new Box3DWorld(bridge)
+    world.reset()
+    return world
+}
 
-describe('Box3D Headless Physical Integration (Feel Invariants)', () => {
+function makeSim(world: Box3DWorld, events?: { onTag?: () => void }): MarbleSim {
+    const settings = useGameStore.getState()
+    return new MarbleSim(world, {
+        // No heights → flat slab environment (F1's original measurement surface)
+        enemySize: settings.enemySize,
+        enemyMass: settings.enemyMass,
+        playerSpawn: { x: 0, y: 1.0, z: 0 },
+        enemySpawn: { x: 0, y: 0.5 + settings.enemySize, z: -20 },
+        events
+    })
+}
+
+describe('Box3D Headless Physical Integration (Feel Invariants, real MarbleSim)', () => {
     it('F1: Enemy in chase catches a stationary player from 20u in < 8s at default tuning', async () => {
-        // Confirm the bridge is available and load it
-        const status = await loadBox3DBridge()
-        expect(status.available).toBe(true)
-
-        const bridge = await loadBox3DBridgeModule()
-        expect(bridge.health()).toBe(1)
-
-        const world = new Box3DWorld(bridge)
-        world.reset()
-
-        // 1. Create Flat Ground (Static Box)
-        // Box3D expects half-extents: world.createStaticBox(x, y, z, hx, hy, hz, friction, restitution)
-        world.createStaticBox(0, 0, 0, 100, 0.5, 100, 0.5, 0.1)
-
-        // 2. Load settings from game store defaults
-        const settings = useGameStore.getState()
-        const enemySize = settings.enemySize
-        const enemyMass = settings.enemyMass
-        const enemySpeed = settings.enemySpeed
-        const enemyAirControl = settings.enemyAirControl
-
-        // 3. Create Player Sphere body (stationary, radius 0.5, sitting on ground at Y = 0.5 + 0.5 = 1.0)
-        const playerBody = world.createDynamicSphere(0, 1.0, 0, 0.5, 1.0, 0.6, 0.2)
-        world.setDamping(playerBody, 0.1, 0.4)
-
-        // 4. Create Enemy Sphere body (20 units away on Z-axis, radius enemySize, sitting on ground at Y = 0.5 + enemySize)
-        const enemyBody = world.createDynamicSphere(0, 0.5 + enemySize, -20, enemySize, enemyMass, 0.8, 0.1)
-        world.setDamping(enemyBody, 0.8, 0.3)
-
-        // Setup AI State
-        const aiState = createAIState()
-        const cachedTarget = new THREE.Vector3()
-        const playerPosVec = new THREE.Vector3()
-        const playerVelVec = new THREE.Vector3(0, 0, 0)
-        const enemyPosVec = new THREE.Vector3()
-        const lastAvoidanceForce = new THREE.Vector3()
-
-        let elapsed = 0.0
-        const dt = 1 / 60
-        const aiInterval = 0.1
-        let lastAiTime = -aiInterval // Force instant first AI update
+        const world = await bootWorld()
 
         let caught = false
-        const maxTime = 8.0 // F1 limit is 8 seconds
+        let catchTime = 0
+        const sim = makeSim(world, { onTag: () => { caught = true } })
 
-        // Run simulation loop
-        while (elapsed < maxTime) {
-            // Read player and enemy transforms
-            const playerTrans = world.readBodyTransform(playerBody)
-            playerPosVec.set(playerTrans.position.x, playerTrans.position.y, playerTrans.position.z)
+        const settings = useGameStore.getState()
+        const params = { enemySpeed: settings.enemySpeed, enemyAirControl: settings.enemyAirControl }
 
-            const enemyTrans = world.readBodyTransform(enemyBody)
-            enemyPosVec.set(enemyTrans.position.x, enemyTrans.position.y, enemyTrans.position.z)
-            const enemyVel = world.getLinearVelocity(enemyBody)
-
-            const dx = playerTrans.position.x - enemyTrans.position.x
-            const dy = playerTrans.position.y - enemyTrans.position.y
-            const dz = playerTrans.position.z - enemyTrans.position.z
-            const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
-
-            // Check contact tag condition (same as Box3DBetaPlaceholder.tsx:397)
-            if (dist < (enemySize + 0.5 + 0.1)) {
-                caught = true
-                console.log(`[TICK] Caught player at elapsed=${elapsed.toFixed(3)}s, dist=${dist.toFixed(3)}`)
-                break
-            }
-
-            // AI Update (Throttled at 10Hz)
-            if (elapsed - lastAiTime >= aiInterval) {
-                lastAiTime = elapsed
-
-                // Check Line-of-sight
-                let canSee = false
-                let hitFraction = 1.0
-                if (dist < 40) {
-                    const visionHit = world.raycastClosest(
-                        enemyTrans.position.x, enemyTrans.position.y, enemyTrans.position.z,
-                        dx, dy, dz
-                    )
-                    // The ray ends at the player center. The player has a radius of 0.5.
-                    // The expected hit fraction when hitting the player sphere boundary is (dist - 0.5) / dist.
-                    // Any obstacle in between would result in a lower fraction.
-                    const expectedFraction = (dist - 0.5 - 0.05) / dist
-                    canSee = !visionHit.hit || visionHit.fraction >= expectedFraction
-                    hitFraction = visionHit.fraction
-                }
-
-                const prevState = aiState.state
-                // AI state machine tick
-                updateAIState(aiState, canSee, playerPosVec, aiInterval, playerVelVec)
-
-                if (aiState.state !== prevState) {
-                    console.log(`[AI STATE CHANGE] ${prevState} -> ${aiState.state} at elapsed=${elapsed.toFixed(3)}s (canSee=${canSee}, fraction=${hitFraction.toFixed(3)}, dist=${dist.toFixed(3)})`)
-                }
-
-                // Get target
-                getMovementTarget(aiState, enemyPosVec, playerPosVec, playerVelVec, cachedTarget)
-
-                // Simple avoidance check
-                const toTargetX = cachedTarget.x - enemyTrans.position.x
-                const toTargetZ = cachedTarget.z - enemyTrans.position.z
-                const toTargetLen = Math.sqrt(toTargetX * toTargetX + toTargetZ * toTargetZ)
-                const desiredX = toTargetLen > 0.01 ? toTargetX / toTargetLen : 0
-                const desiredZ = toTargetLen > 0.01 ? toTargetZ / toTargetLen : 0
-
-                const enemyVelLen = Math.sqrt(enemyVel.x * enemyVel.x + enemyVel.z * enemyVel.z)
-                const velDirX = enemyVelLen > 0.01 ? enemyVel.x / enemyVelLen : desiredX
-                const velDirZ = enemyVelLen > 0.01 ? enemyVel.z / enemyVelLen : desiredZ
-
-                const checkDirX = enemyVelLen > 1 ? velDirX : desiredX
-                const checkDirZ = enemyVelLen > 1 ? velDirZ : desiredZ
-
-                const rayLen = enemySize + 2.4
-                const avoidHit = world.raycastClosest(
-                    enemyTrans.position.x, enemyTrans.position.y, enemyTrans.position.z,
-                    checkDirX * rayLen, 0, checkDirZ * rayLen
-                )
-
-                lastAvoidanceForce.set(0, 0, 0)
-                if (avoidHit.hit) {
-                    const angle = Math.PI / 3
-                    const cosA = Math.cos(angle)
-                    const sinA = Math.sin(angle)
-                    const rotX = checkDirX * cosA - checkDirZ * sinA
-                    const rotZ = checkDirX * sinA + checkDirZ * cosA
-                    lastAvoidanceForce.set(rotX * 20, 0, rotZ * 20)
-                }
-            }
-
-            // Grounding check for enemy
-            const groundHit = world.raycastClosest(
-                enemyTrans.position.x, enemyTrans.position.y, enemyTrans.position.z,
-                0, -(enemySize + 0.4), 0
-            )
-            const isEnemyGrounded = groundHit.hit && groundHit.fraction <= ((enemySize + 0.2) / (enemySize + 0.4))
-            const enemyControl = isEnemyGrounded ? 1.0 : enemyAirControl
-
-            // Direction heading
-            let moveX = playerTrans.position.x - enemyTrans.position.x
-            let moveZ = playerTrans.position.z - enemyTrans.position.z
-            if (aiState.state !== 'chase' && aiState.state !== 'alert') {
-                moveX = cachedTarget.x - enemyTrans.position.x
-                moveZ = cachedTarget.z - enemyTrans.position.z
-            }
-
-            const moveLen = Math.sqrt(moveX * moveX + moveZ * moveZ)
-            const headingX = moveLen > 0.01 ? moveX / moveLen : 0
-            const headingZ = moveLen > 0.01 ? moveZ / moveLen : 0
-
-            let fx = headingX + lastAvoidanceForce.x
-            let fz = headingZ + lastAvoidanceForce.z
-
-            // Steering brake overshoot alignment
-            const enemyVelLen = Math.sqrt(enemyVel.x * enemyVel.x + enemyVel.z * enemyVel.z)
-            if (enemyVelLen > 2) {
-                const velDirX = enemyVel.x / enemyVelLen
-                const velDirZ = enemyVel.z / enemyVelLen
-                const alignment = velDirX * headingX + velDirZ * headingZ
-                if (alignment < 0.3) {
-                    const brakingStrength = (1 - alignment) * enemyVelLen * 0.5
-                    fx -= velDirX * brakingStrength
-                    fz -= velDirZ * brakingStrength
-                }
-            }
-
-            // Apply steering force
-            const speedMultiplier = settings.useV2AI ? (aiState.state === 'chase' ? 1.3 : 1.0) : 1.0
-            const forceStrength = enemySpeed * speedMultiplier * 15 * enemyControl
-            world.applyForceToCenter(enemyBody, fx * forceStrength, 0, fz * forceStrength)
-
-            // Step the simulation
-            world.step(dt)
-            elapsed += dt
+        const maxTime = 8.0 // F1 limit
+        let elapsed = 0
+        while (elapsed < maxTime && !caught) {
+            sim.step(FIXED_DT, NO_INPUT, params)
+            elapsed += FIXED_DT
+            if (caught) catchTime = elapsed
         }
 
-        console.log(`Simulation complete. Enemy state: ${aiState.state}, caught: ${caught}, time: ${elapsed.toFixed(3)}s`)
+        console.log(`F1 complete. AI state: ${sim.currentAIState}, caught: ${caught}, time: ${catchTime.toFixed(3)}s`)
         expect(caught).toBe(true)
-        expect(elapsed).toBeLessThan(maxTime)
+        expect(catchTime).toBeLessThan(maxTime)
+        expect(sim.tagged).toBe(true)
+
+        world.destroy()
+    })
+
+    it('F9: identical inputs produce bit-identical trajectories (fixed-step physics determinism)', async () => {
+        // Scripted input: hold W for 2s, then release, over 5 sim-seconds total.
+        // Stays in alert/chase (LOS never breaks on the flat slab), so the one
+        // remaining Math.random() source (search waypoints) never fires.
+        const script = (stepIndex: number): SimInput => ({
+            w: stepIndex < 120,
+            a: false,
+            s: false,
+            d: false,
+            space: stepIndex === 150, // one jump
+            shift: stepIndex >= 240
+        })
+
+        const settings = useGameStore.getState()
+        const params = { enemySpeed: settings.enemySpeed, enemyAirControl: settings.enemyAirControl }
+        const steps = 300
+
+        async function run(): Promise<number[]> {
+            const world = await bootWorld()
+            const sim = makeSim(world)
+            for (let i = 0; i < steps; i++) {
+                sim.step(FIXED_DT, script(i), params)
+            }
+            const out = [
+                sim.playerCurr.position.x, sim.playerCurr.position.y, sim.playerCurr.position.z,
+                sim.enemyCurr.position.x, sim.enemyCurr.position.y, sim.enemyCurr.position.z
+            ]
+            world.destroy()
+            return out
+        }
+
+        const a = await run()
+        const b = await run()
+
+        for (let i = 0; i < a.length; i++) {
+            expect(b[i]).toBe(a[i]) // exact — same WASM ops, same order, same dt
+        }
+        // Sanity: the run actually moved things (not comparing frozen zeros)
+        expect(Math.abs(a[2]) + Math.abs(a[5])).toBeGreaterThan(0.01)
+    })
+
+    it('resetPositions restores spawn state and clears the tag flag', async () => {
+        const world = await bootWorld()
+        const sim = makeSim(world)
+        const settings = useGameStore.getState()
+        const params = { enemySpeed: settings.enemySpeed, enemyAirControl: settings.enemyAirControl }
+
+        for (let i = 0; i < 240; i++) sim.step(FIXED_DT, NO_INPUT, params)
+        expect(sim.enemyCurr.position.distanceTo(sim.playerCurr.position)).toBeLessThan(20)
+
+        sim.resetPositions()
+        expect(sim.tagged).toBe(false)
+        expect(sim.currentAIState).toBe('idle')
+        expect(sim.playerCurr.position.y).toBeCloseTo(1.0, 3)
+        expect(sim.enemyCurr.position.z).toBeCloseTo(-20, 3)
 
         world.destroy()
     })

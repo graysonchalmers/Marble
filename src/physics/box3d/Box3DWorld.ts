@@ -60,6 +60,19 @@ export class Box3DWorld implements PhysicsWorldAdapter {
         this.smokeSpherePtr = spherePtr
     }
 
+    /**
+     * Destroy all bodies (including the smoke-test floor/sphere) but keep the
+     * world alive. Gameplay setups call this before building the real level so
+     * no invisible smoke-test colliders linger under the terrain.
+     */
+    clearBodies(): void {
+        for (const bodyPtr of this.bodies) {
+            this.bridge.bodyDestroy(bodyPtr)
+        }
+        this.bodies = []
+        this.smokeSpherePtr = 0
+    }
+
     private destroyWorldOnly(): void {
         for (const bodyPtr of this.bodies) {
             this.bridge.bodyDestroy(bodyPtr)
