@@ -27,11 +27,13 @@ graph TD
 * Manages WebAssembly heap allocation pointers (e.g. `transformPtr`, `velocityPtr`, `raycastPtr`).
 * Implements type-safe wrappers for force/torque impulses, damping settings, resets, and raycasting queries.
 
-### 3. Visual & Simulation Loop (`Box3DBetaPlaceholder.tsx`)
+### 3. Visual & Simulation Loop (Box3DScene.tsx)
 * **WASM-Native Vision & Ground Queries:** Replaces Three.js raycasts with native `world.raycastClosest` queries.
-  * *Vision:* Ray length matches displacement vector to player. If closest hit fraction `< 0.95`, it's occluded by terrain/walls.
+  * *Vision:* Ray length matches displacement vector to player. Uses a dynamic fraction threshold check to verify clear line-of-sight without clipping player boundaries.
   * *Grounding:* Downward raycast fraction <= `(size+0.2) / (size+0.4)` evaluates if entity is grounded.
 * **Pausing:** Toggles the loop execution using the store's `isPaused` state to completely freeze the physics simulation and visual interpolation hooks.
+* **Unified Rules & Sonar Loop Ticking:** Houses a custom `Box3DGameLoopDriver` child component which advances the `GameLoop` and ticks the neutral `rulesSystem` and `sonarSystem` every frame.
+* **Spatial Audio Listener:** Drives `soundManager.updateListener` and manages the audio graphs during setup, play, pause, and game-over transitions.
 * **Interpolation:** Visual meshes are smoothed using `lerp` and `slerp` against physics transforms to prevent high-frequency frame jitter.
 
 ---

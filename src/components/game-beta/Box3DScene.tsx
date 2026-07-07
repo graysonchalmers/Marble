@@ -1,11 +1,14 @@
+import React, { useEffect, useRef, useState, useMemo } from 'react'
+import * as THREE from 'three'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { Environment, Sky } from '@react-three/drei'
-import { useEffect, useRef, useState, useMemo } from 'react'
-import * as THREE from 'three'
 import { Box3DWorld } from '../../physics/box3d/Box3DWorld'
 import { loadBox3DBridge, loadBox3DBridgeModule } from '../../physics/box3d/box3dBridge'
 import { useGameStore } from '../../store/useGameStore'
 import { soundManager } from '../../audio/SoundManager'
+import { GameLoop } from '../../engine/loop'
+import { rulesSystem } from '../../systems/rules/RulesSystem'
+import { SonarSystem } from '../../systems/sonar/SonarSystem'
 import {
     createAIState,
     updateAIState,
@@ -66,6 +69,68 @@ function useGridTexture(colorBg: string, colorGrid: string, gridStep: number = 6
     }, [colorBg, colorGrid, gridStep])
 }
 
+// Logic component that drives the rules engine, sonar system, and sound listener
+function Box3DGameLoopDriver({ playerPos, enemyPos }: {
+    playerPos: React.MutableRefObject<THREE.Vector3>,
+    enemyPos: React.MutableRefObject<THREE.Vector3>
+}) {
+    const gameState = useGameStore(s => s.gameState)
+    const isPaused = useGameStore(s => s.isPaused)
+
+    // Instantiate neutral systems
+    const loop = useMemo(() => new GameLoop({ simRate: 60 }), [])
+    const sonarSystem = useMemo(() => new SonarSystem(playerPos, enemyPos), [playerPos, enemyPos])
+
+    // Register ticks
+    useEffect(() => {
+        const tickRules = (dt: number) => rulesSystem.tick(dt)
+        const tickSonar = (dt: number) => sonarSystem.tick(dt)
+
+        loop.addTick(tickRules)
+        loop.addTick(tickSonar)
+
+        return () => {
+            loop.removeTick(tickRules)
+            loop.removeTick(tickSonar)
+            loop.stop()
+        }
+    }, [loop, sonarSystem])
+
+    // Manage Sonar audio graphs reactively
+    useEffect(() => {
+        if (gameState === 'playing' && !isPaused) {
+            soundManager.startSonar()
+        } else {
+            soundManager.stopSonar()
+        }
+        return () => soundManager.stopSonar()
+    }, [gameState, isPaused])
+
+    // Reset systems on restart or setup
+    useEffect(() => {
+        if (gameState === 'setup' || gameState === 'countdown') {
+            loop.reset()
+            rulesSystem.reset()
+            sonarSystem.reset()
+        }
+    }, [gameState, loop, sonarSystem])
+
+    useFrame((state, delta) => {
+        if (isPaused) return
+        const clampedDelta = Math.min(delta, 0.05)
+        
+        // Advance loop (ticking rules and sonar)
+        loop.advance(clampedDelta)
+
+        // Update listener position for spatial audio direction
+        if (gameState === 'playing') {
+            soundManager.updateListener(state.camera)
+        }
+    })
+
+    return null
+}
+
 type PlayableSceneProps = {
     world: Box3DWorld
     playerBodyPtr: number
@@ -118,7 +183,6 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
     const AI_UPDATE_INTERVAL = 0.1 // 10Hz
     const lastUIUpdate = useRef(0)
     const UI_UPDATE_INTERVAL = 0.033 // 30Hz
-    const nextPingTime = useRef(0)
 
     // Procedural terrain mesh
     const geom = useMemo(() => {
@@ -254,17 +318,17 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
             }
         }
 
-        if (keys.space && isGrounded && canJump.current) {
-            world.applyLinearImpulseToCenter(playerBodyPtr, 0, 7.5, 0)
-            canJump.current = false
-            setTimeout(() => { canJump.current = true }, 400)
-        }
-
         const currentSpeed = Math.sqrt(playerVel.x * playerVel.x + playerVel.z * playerVel.z)
         const topSpeed = 22
         if (currentSpeed > topSpeed) {
             const decay = targetDecay(currentSpeed, topSpeed, clampedDelta)
             world.setLinearVelocity(playerBodyPtr, playerVel.x * decay, playerVel.y, playerVel.z * decay)
+        }
+
+        if (keys.space && isGrounded && canJump.current) {
+            world.applyLinearImpulseToCenter(playerBodyPtr, 0, 7.5, 0)
+            canJump.current = false
+            setTimeout(() => { canJump.current = true }, 400)
         }
 
         // --- ENEMY AI LOGIC STEPS (Throttled) ---
@@ -284,7 +348,7 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
                     enemyTrans.position.x, enemyTrans.position.y, enemyTrans.position.z,
                     dx, dy, dz
                 )
-                // If it didn't hit anything, or the closest hit is extremely close to the player's boundary
+                // Filter out player sphere itself using dynamic fraction based on distance and player radius (0.5)
                 const expectedFraction = (distToPlayer - 0.5 - 0.05) / distToPlayer
                 canSee = !visionHit.hit || visionHit.fraction >= expectedFraction
             }
@@ -335,10 +399,15 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
                 lastAvoidanceForce.current.set(rotX * 20, 0, rotZ * 20)
             }
 
-            // Sync enemy position to Zustand for HUD/Radar updates
+            // Sync coordinates to Zustand for HUD, Minimap, and Radar updates
             if (currentTime - lastUIUpdate.current > UI_UPDATE_INTERVAL) {
                 lastUIUpdate.current = currentTime
                 useGameStore.setState({
+                    playerPosition: {
+                        x: playerTrans.position.x,
+                        y: playerTrans.position.y,
+                        z: playerTrans.position.z
+                    },
                     enemyPosition: {
                         x: enemyTrans.position.x,
                         y: enemyTrans.position.y,
@@ -390,15 +459,8 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
         const forceStrength = enemySpeed * speedMultiplier * 15 * enemyControl
         world.applyForceToCenter(enemyBodyPtr, fx * forceStrength, 0, fz * forceStrength)
 
-        // --- SPATIAL SONAR PINGS ---
-        const distToPlayer = enemyPosVec.current.distanceTo(playerPosVec.current)
-        if (currentTime > nextPingTime.current) {
-            const interval = THREE.MathUtils.clamp(THREE.MathUtils.mapLinear(distToPlayer, 5, 50, 0.2, 1.5), 0.2, 1.5)
-            soundManager.playSpatialPing(enemyPosVec.current, 800 + (50 - distToPlayer) * 10)
-            nextPingTime.current = currentTime + interval
-        }
-
         // --- CONTACT TAG TRIGGER ---
+        const distToPlayer = enemyPosVec.current.distanceTo(playerPosVec.current)
         if (distToPlayer < (enemySize + 0.5 + 0.1)) {
             soundManager.playBonkSound()
             setGameState('gameover')
@@ -426,9 +488,6 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
         const postPlayerTrans = world.readBodyTransform(playerBodyPtr)
         const postPlayerVel = world.getLinearVelocity(playerBodyPtr)
 
-        const postEnemyTrans = world.readBodyTransform(enemyBodyPtr)
-        const postEnemyVel = world.getLinearVelocity(enemyBodyPtr)
-
         // Visual interpolation for player
         const playerSpeed = Math.sqrt(postPlayerVel.x * postPlayerVel.x + postPlayerVel.y * postPlayerVel.y + postPlayerVel.z * postPlayerVel.z)
         tempPos.current.set(postPlayerTrans.position.x, postPlayerTrans.position.y, postPlayerTrans.position.z)
@@ -453,6 +512,8 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
         }
 
         // Visual interpolation for enemy
+        const postEnemyTrans = world.readBodyTransform(enemyBodyPtr)
+        const postEnemyVel = world.getLinearVelocity(enemyBodyPtr)
         const enemySpeedVal = Math.sqrt(postEnemyVel.x * postEnemyVel.x + postEnemyVel.y * postEnemyVel.y + postEnemyVel.z * postEnemyVel.z)
         tempPos.current.set(postEnemyTrans.position.x, postEnemyTrans.position.y, postEnemyTrans.position.z)
         if (enemySpeedVal > 0.5) {
@@ -490,7 +551,6 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
 
         // Light follow
         if (lightRef.current && lightTarget.current) {
-            // Using the normalized sun direction from Box3D C samples [0.5, 0.8, 0.4] scaled by 35
             lightRef.current.position.set(
                 smoothedBallPos.current.x + 17.5,
                 smoothedBallPos.current.y + 28.0,
@@ -513,6 +573,8 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
 
     return (
         <>
+            <Box3DGameLoopDriver playerPos={playerPosVec} enemyPos={enemyPosVec} />
+
             <ambientLight intensity={0.4} />
             <directionalLight
                 ref={lightRef}
@@ -568,16 +630,12 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
     )
 }
 
-export function Box3DBetaPlaceholder() {
+export function Box3DScene() {
     const [status, setStatus] = useState<{
         loaded: boolean
-        headline: string
-        details: string[]
         error?: string
     }>({
-        loaded: false,
-        headline: 'Initializing Box3D system...',
-        details: []
+        loaded: false
     })
 
     const [world, setWorld] = useState<Box3DWorld | null>(null)
@@ -628,11 +686,7 @@ export function Box3DBetaPlaceholder() {
             if (!active) return
 
             if (!probe.available) {
-                setStatus({
-                    loaded: false,
-                    headline: probe.headline,
-                    details: probe.details
-                })
+                setStatus({ loaded: false, error: probe.headline })
                 return
             }
 
@@ -697,24 +751,13 @@ export function Box3DBetaPlaceholder() {
             setPlayerBodyPtr(playerBody)
             setEnemyBodyPtr(enemyBody)
 
-            setStatus({
-                loaded: true,
-                headline: `Box3D physics engine running successfully.`,
-                details: [
-                    `Physics rate: 60Hz`,
-                    `Terrain size: ${WIDTH}x${DEPTH}`,
-                    `Controls: WASD / Arrows to roll, Space to jump, Shift to brake`,
-                    `Enemy AI is active and tracking. Sonar is spatial.`
-                ]
-            })
+            setStatus({ loaded: true })
         }
 
         boot().catch(err => {
             if (active) {
                 setStatus({
                     loaded: false,
-                    headline: 'Failed to boot Box3D physics.',
-                    details: [],
                     error: err instanceof Error ? err.message : String(err)
                 })
             }
@@ -726,36 +769,28 @@ export function Box3DBetaPlaceholder() {
         }
     }, [visualHeights])
 
-    return (
-        <div className="box3d-beta">
-            <div className="box3d-beta-scene" aria-label="Box3D physics simulation canvas">
-                {world && playerBodyPtr && enemyBodyPtr ? (
-                    <Canvas camera={{ position: [0, 8, 12], fov: 45 }} shadows>
-                        <Box3DPlayableScene
-                            world={world}
-                            playerBodyPtr={playerBodyPtr}
-                            enemyBodyPtr={enemyBodyPtr}
-                            keys={keys}
-                            visualHeights={visualHeights}
-                        />
-                    </Canvas>
-                ) : (
-                    <div className="box3d-beta-loading">Loading Box3D physics simulator...</div>
-                )}
+    if (status.error) {
+        return (
+            <div className="box3d-error-screen" style={{ color: '#ff8d7a', padding: 24, textAlign: 'center' }}>
+                <h2>Failed to boot Box3D physics.</h2>
+                <p>{status.error}</p>
             </div>
+        )
+    }
 
-            <div className="box3d-beta-panel">
-                <h2>Box3D Physics Beta</h2>
-                <p>{status.headline}</p>
-                {status.error && <p className="box3d-beta-error">{status.error}</p>}
-                <ul className="box3d-beta-list">
-                    {status.details.map(detail => (
-                        <li key={detail}>{detail}</li>
-                    ))}
-                </ul>
-                <p>Visual and physical heightfield meshes are aligned. Use the keyboard to test the rolling, jumping, and momentum mechanics.</p>
-            </div>
-        </div>
+    if (!world || !playerBodyPtr || !enemyBodyPtr) {
+        return <div className="box3d-beta-loading">Loading Box3D physics simulator...</div>
+    }
+
+    return (
+        <Canvas camera={{ position: [0, 8, 12], fov: 45 }} shadows>
+            <Box3DPlayableScene
+                world={world}
+                playerBodyPtr={playerBodyPtr}
+                enemyBodyPtr={enemyBodyPtr}
+                keys={keys}
+                visualHeights={visualHeights}
+            />
+        </Canvas>
     )
 }
-
