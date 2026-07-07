@@ -6,6 +6,7 @@ import { Box3DWorld } from './Box3DWorld'
 import { loadBox3DBridge, loadBox3DBridgeModule } from './box3dBridge'
 import { useGameStore } from '../../store/useGameStore'
 import { createAIState, updateAIState, getMovementTarget } from '../../systems/ai/EnemyAI'
+// @ts-expect-error - compiled JS module doesn't have TS declarations
 import createMarbleBox3DBridgeModule from '../../../public/box3d/box3d_bridge.js'
 
 // Setup Node-compatible environment for Emscripten WASM loading
@@ -58,23 +59,7 @@ const globalObj = globalThis as any
 globalObj.window = globalThis
 globalObj.createMarbleBox3DBridgeModule = createMarbleBox3DBridgeModule
 
-// Helper to generate terrain heights matching Box3DBetaPlaceholder
-const WIDTH = 64
-const DEPTH = 64
-const SCALE = 2
 
-function generateTerrainHeights() {
-    const heights: number[] = []
-    for (let z = 0; z < DEPTH; z++) {
-        for (let x = 0; x < WIDTH; x++) {
-            const xn = (x / WIDTH) * 5
-            const zn = (z / DEPTH) * 5
-            const y = Math.sin(xn * 1.5) * Math.cos(zn * 1.5) * 2.5 + Math.sin(xn * 4 + zn * 2) * 0.8
-            heights.push(y)
-        }
-    }
-    return heights
-}
 
 describe('Box3D Headless Physical Integration (Feel Invariants)', () => {
     it('F1: Enemy in chase catches a stationary player from 20u in < 8s at default tuning', async () => {
@@ -90,7 +75,7 @@ describe('Box3D Headless Physical Integration (Feel Invariants)', () => {
 
         // 1. Create Flat Ground (Static Box)
         // Box3D expects half-extents: world.createStaticBox(x, y, z, hx, hy, hz, friction, restitution)
-        const groundBody = world.createStaticBox(0, 0, 0, 100, 0.5, 100, 0.5, 0.1)
+        world.createStaticBox(0, 0, 0, 100, 0.5, 100, 0.5, 0.1)
 
         // 2. Load settings from game store defaults
         const settings = useGameStore.getState()

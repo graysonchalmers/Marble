@@ -1,4 +1,5 @@
 import { Canvas, useFrame } from '@react-three/fiber'
+import { Environment, Sky } from '@react-three/drei'
 import { useEffect, useRef, useState, useMemo } from 'react'
 import * as THREE from 'three'
 import { Box3DWorld } from '../../physics/box3d/Box3DWorld'
@@ -96,6 +97,9 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
     const smoothedEnemyPos = useRef(new THREE.Vector3(0, 20, -15))
     const smoothedEnemyQuat = useRef(new THREE.Quaternion())
     const smoothedCamTarget = useRef(new THREE.Vector3(0, 6, 0))
+
+    const lightRef = useRef<THREE.DirectionalLight>(null)
+    const lightTarget = useRef<THREE.Object3D>(null)
 
     // Scratchpads & tracking
     const tempPos = useRef(new THREE.Vector3())
@@ -483,6 +487,20 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
 
         state.camera.position.lerp(tempTargetCamPos.current, smoothFactor)
         state.camera.lookAt(smoothedCamTarget.current)
+
+        // Light follow
+        if (lightRef.current && lightTarget.current) {
+            // Using the normalized sun direction from Box3D C samples [0.5, 0.8, 0.4] scaled by 35
+            lightRef.current.position.set(
+                smoothedBallPos.current.x + 17.5,
+                smoothedBallPos.current.y + 28.0,
+                smoothedBallPos.current.z + 14.0
+            )
+            lightTarget.current.position.copy(smoothedBallPos.current)
+            lightRef.current.target = lightTarget.current
+            lightRef.current.updateMatrixWorld()
+            lightTarget.current.updateMatrixWorld()
+        }
     })
 
     function targetDecay(current: number, target: number, dt: number) {
@@ -495,8 +513,29 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
 
     return (
         <>
-            <ambientLight intensity={0.6} />
-            <directionalLight position={[10, 20, 10]} intensity={1.5} castShadow />
+            <ambientLight intensity={0.4} />
+            <directionalLight
+                ref={lightRef}
+                intensity={1.2}
+                castShadow
+                shadow-mapSize={[2048, 2048]}
+                shadow-camera-left={-40}
+                shadow-camera-right={40}
+                shadow-camera-top={40}
+                shadow-camera-bottom={-40}
+                shadow-camera-near={0.5}
+                shadow-camera-far={100}
+            />
+            <object3D ref={lightTarget} />
+
+            <Sky
+                turbidity={2}
+                rayleigh={1}
+                mieCoefficient={0.005}
+                mieDirectionalG={0.8}
+                sunPosition={[17.5, 28, 14]}
+            />
+            <Environment preset="sunset" />
 
             {/* Terrain Visual Mesh */}
             <mesh receiveShadow geometry={geom} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
@@ -522,9 +561,9 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
                 />
             </mesh>
 
-            {/* Fog background color */}
-            <color attach="background" args={["#111318"]} />
-            <fog attach="fog" args={["#111318", 30, 80]} />
+            {/* Fog background color matched to sky horizon */}
+            <color attach="background" args={["#cbdbe6"]} />
+            <fog attach="fog" args={["#cbdbe6", 30, 110]} />
         </>
     )
 }
