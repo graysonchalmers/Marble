@@ -7,6 +7,8 @@ import { UnifiedDebugMenu } from './components/ui/UnifiedDebugMenu'
 import { MiniMap } from './components/ui/MiniMap'
 import { StartScreen, PauseScreen, GameOverScreen } from './components/ui/MenuOverlay'
 import { VersionOverlay } from './components/ui/VersionOverlay'
+import { Box3DBetaPlaceholder } from './components/game-beta/Box3DBetaPlaceholder'
+import { getRuntimePhysicsBackend } from './physics/runtime'
 
 function GameUI() {
   const {
@@ -144,6 +146,11 @@ function App() {
 
 function AppInner() {
   const { playerPosition, enemyPosition, uiAccentColor } = useGameStore()
+  const physicsBackend = getRuntimePhysicsBackend(window.location.search)
+
+  if (physicsBackend === 'box3d') {
+    return <Box3DBetaPlaceholder />
+  }
 
   return (
     <>
@@ -210,3 +217,4 @@ function AppInner() {
 }
 
 export default App
+

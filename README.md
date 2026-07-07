@@ -6,8 +6,8 @@ A 3D predator-prey game: you're a marble hunted by an AI sphere, and a **sonar a
 
 ## 🚀 Quickstart
 
-Double-click **`launch_v2.bat`** (installs deps on first run, serves on **:5174**).
-V1 lives in the OneDrive folder via its own `launch_game.bat` (**:5173**). Run both for A/B comparison.
+Double-click **`Launch - Game Picker.bat`** for the version selector. Use **`Launch - Latest Version.bat`** for the default current build, or **`Launch - Box3D Beta.bat`** for the beta route.
+V1 lives in the separate OneDrive repo via its own launcher on **:5173**. Run both for A/B comparison.
 
 ```bash
 npm install
@@ -29,3 +29,7 @@ npm run test                 # vitest (8 tests — engine loop + event bus)
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Target architecture: systems vs React, perf program |
 | [docs/PLAN.md](docs/PLAN.md) | Phased build plan with exit gates |
 | [docs/TUNING.md](docs/TUNING.md) | v1 earned tuning values (frozen reference — data, not code) |
+| [docs/BOX3D_BETA_PLAN.md](docs/BOX3D_BETA_PLAN.md) | Parallel Box3D physics beta plan: shared resources, risks, phases, gates |
+| [docs/BOX3D_BETA_HANDOFF.md](docs/BOX3D_BETA_HANDOFF.md) | Current blocker state, expected bridge artifacts, and the next developer handoff steps |
+
+

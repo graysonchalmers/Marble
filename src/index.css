@@ -13,6 +13,105 @@ body,
 canvas {
   display: block;
 }
+/* Box3D beta route */
+.box3d-beta {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  background: #111318;
+  color: #ffffff;
+  font-family: "Inter", sans-serif;
+}
+
+.box3d-beta-scene {
+  min-width: 0;
+  min-height: 0;
+  background: #111318;
+}
+
+.box3d-beta-loading {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.95rem;
+}
+
+.box3d-beta-panel {
+  padding: 24px;
+  border-left: 1px solid rgba(255, 255, 255, 0.12);
+  background: #171b20;
+  overflow-y: auto;
+}
+
+.box3d-beta-panel h2 {
+  margin: 0 0 16px;
+  font-size: 1.2rem;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.box3d-beta-panel p {
+  margin: 0 0 12px;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.94rem;
+  line-height: 1.48;
+}
+
+.box3d-beta-error {
+  color: #ff8d7a !important;
+}
+
+.box3d-beta-list {
+  margin: 0 0 16px;
+  padding-left: 18px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.box3d-beta-list li {
+  margin-bottom: 8px;
+}
+
+.box3d-beta-meter {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 16px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.box3d-beta-meter span {
+  color: rgba(255, 255, 255, 0.66);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+}
+
+.box3d-beta-meter strong {
+  color: #24d6a2;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+
+@media (max-width: 760px) {
+  .box3d-beta {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .box3d-beta-panel {
+    max-height: 44vh;
+    border-left: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+  }
+}
 
 /* App.tsx styles */
 .velocity-debug {
@@ -943,4 +1042,6 @@ canvas {
     opacity: 1;
   }
 }
+
+
 
