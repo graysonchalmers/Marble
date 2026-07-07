@@ -280,8 +280,9 @@ function Box3DPlayableScene({ world, playerBodyPtr, enemyBodyPtr, keys, visualHe
                     enemyTrans.position.x, enemyTrans.position.y, enemyTrans.position.z,
                     dx, dy, dz
                 )
-                // If it didn't hit anything, or the closest hit is extremely close to endpoint (player)
-                canSee = !visionHit.hit || visionHit.fraction > 0.95
+                // If it didn't hit anything, or the closest hit is extremely close to the player's boundary
+                const expectedFraction = (distToPlayer - 0.5 - 0.05) / distToPlayer
+                canSee = !visionHit.hit || visionHit.fraction >= expectedFraction
             }
 
             // 2. State machine update

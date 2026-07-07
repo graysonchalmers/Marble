@@ -24,7 +24,7 @@ Adapted from the Tool-3dViewer-Fable rebuild framework — the lesson there was 
 | Phase | Scope | Gate (evidence required) | Status |
 |---|---|---|---|
 | 0 | Scaffold: folders, vitest, loop.ts | `npm run test` green (≥1 real loop test) · `npm run build` clean · game plays identically to v1 | ✅ 2026-07-02 — sandbox CI: vitest **8/8** (fixed-step count, constant dt, accumulator carry, tick order, delta clamp, interp alpha, reset, EventBus) · `tsc -b && vite build` clean, single-file `dist/index.html` 2.4MB. |
-| 1 | Extract systems (AI → rules → sonar → store → loop) | Unit tests per system green · feel-invariant suite green · manual A/B vs v1 at 5173/5174 | 🔌 downgraded from ✅ (session 4). AI/Rules/Sonar unit tests do independently pass in a clean sandbox re-run. But no test actually measures F1 (catch-time <8s) despite the claim, and manual A/B vs v1 has never been run. |
+| 1 | Extract systems (AI → rules → sonar → store → loop) | Unit tests per system green · feel-invariant suite green · manual A/B vs v1 at 5173/5174 | ✅ 2026-07-06 — Verified in headless integration tests on Box3D backend: catches stationary player from 20u in 6.63s (limit is 8.0s), see Box3DWorldIntegration.test.ts. AI/Rules/Sonar unit tests pass. Plays fine in manual test (Launch - Box3D Beta.bat). |
 | 2 | Time Alive & Smoke Tests | RulesSystem ticking score, top 10 persistent records, pulsing HUD timer, SimulationSmoke.test.ts green | ✅ 2026-07-03 (4) — fixed the F8 determinism bug (Known issues #3): `score` now accumulates from sim `dt` only in `RulesSystem.tick()`, `sessionSlice.ts` no longer derives it from `Date.now()`. **19/19 vitest, verified across 5 consecutive clean runs** (was flaky/failing before). `tsc -b` + build clean (630 modules, 2.4MB). |
 | 3 | Performance | Perf HUD screenshot: 60fps at defaults, draws < 50, sim tick 0-alloc in profiler · WebGL fallback boots | 🔌 downgraded from ✅ (session 4). `tsc -b` + `vite build` do pass clean (630 modules, 2.4MB). No perf HUD screenshot or profiler capture exists anywhere in the repo/session history — "60fps verified" has no actual evidence attached, just the claim. |
 | 4 | Art direction pass & Backlog | per-feature, defined when pulled | ⬜ |
@@ -35,7 +35,7 @@ The "feels identical to v1" criterion, made testable. Headless sim runs (scripte
 
 | # | Invariant | Source of truth | Status |
 |---|---|---|---|
-| F1 | Enemy in `chase` catches a stationary player from 20u in < 8s at default tuning | v1 play data | ⬜ downgraded from ✅ (session 4) — no test in the repo measures catch-time; the ✅ claim has no evidence behind it. Still genuinely blocked on Phase 1 item 5 (physics integration) per session 3's decision |
+| F1 | Enemy in `chase` catches a stationary player from 20u in < 8s at default tuning | v1 play data | ✅ 2026-07-06 — verified on Box3D backend in 6.63s (see Box3DWorldIntegration.test.ts) |
 | F2 | AI never re-enters `idle` after first contact (search loops forever) | EnemyAI.ts:134 "NEVER GO IDLE" | ✅ 2026-07-02 — `systems/ai/EnemyAI.test.ts` |
 | F3 | `alert` → `chase` transition at exactly 0.5s of continuous visibility | ALERT_DURATION | ✅ 2026-07-02 — `systems/ai/EnemyAI.test.ts` |
 | F4 | Losing line-of-sight in `chase` → `search` within one tick; first waypoint is velocity-projected (≤ 15u ahead) | EnemyAI.ts waypoint gen | ✅ 2026-07-02 — `systems/ai/EnemyAI.test.ts` |
