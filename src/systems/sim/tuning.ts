@@ -58,8 +58,15 @@ export const PLAYER = {
     topSpeed: 22,
     /** Exponential decay rate applied above topSpeed. */
     topSpeedDecayRate: 15,
-    /** Upward jump impulse. */
+    /** Upward jump impulse (legacy/torque path + preset contract; velocity model derives impulse from jumpHeight). */
     jumpImpulse: 7.5,
+    /**
+     * Target jump apex height in world units (velocity model). Impulse is derived
+     * per-preset from this + gravity + mass so jump *height* stays constant across
+     * gravity presets: v = sqrt(2·|g|·h), impulse = mass·v. Default clears the
+     * enemy ball (~1.8u diameter incl. margin) but never summits the 7u cubes.
+     */
+    jumpHeight: 1.8,
     /** Jump cooldown in sim seconds (was wall-clock setTimeout 400ms). */
     jumpCooldown: 0.4,
     /** Downward ground probe length. */
@@ -85,12 +92,23 @@ export const ENEMY = {
     /** Avoidance steering deflection (rad) and strength. */
     avoidAngle: Math.PI / 3,
     avoidStrength: 20,
-    /** Braking when velocity misaligned with heading. */
+    /** Braking when velocity misaligned with heading (force model only). */
     brakeAlignmentThreshold: 0.3,
     brakeStrengthFactor: 0.5,
     minSpeedForBraking: 2,
     /** AI decision rate (s). Deterministic sim-time accumulator, not wall clock. */
-    aiUpdateInterval: 0.1
+    aiUpdateInterval: 0.1,
+
+    /* --- Velocity model (mirrors the player's velocity drive) --- */
+    /**
+     * Enemy top speed (u/s) = enemySpeed(setting) · stateSpeedMultiplier · velUnit.
+     * At default enemySpeed 2: chase(1.5)=19.5, search(1.2)=15.6, alert(0.1)=1.3, idle(0)=0.
+     * Chase sits just under the player's 20 u/s so a clean run can barely open a gap —
+     * predictive interception (getMovementTarget) closes it. Raise for more pressure.
+     */
+    velUnit: 6.5,
+    /** Acceleration toward the target velocity (u/s²). */
+    velAccel: 45
 } as const
 
 export const RULES = {
@@ -98,6 +116,23 @@ export const RULES = {
     tagSlack: 0.1,
     /** Fall-off-world reset threshold (y). */
     fallResetY: -25
+} as const
+
+/** Cosmetic FX thresholds (drive render-only particle bursts; never affect the sim). */
+export const FX = {
+    /** Single-step horizontal speed drop (u/s) that counts as an impact (wall/cube hit). */
+    impactSpeedDrop: 6,
+    /** Downward speed (u/s) at touchdown that counts as a hard landing. */
+    landSpeed: 5,
+    /** Player speed (u/s) above which roll trails start emitting. */
+    trailMinSpeed: 6,
+    /**
+     * Enemy leaves a fading ground breadcrumb "scent trail" so you can read where it's
+     * been. Drop one mark per this much enemy travel (u). Lower = denser trail.
+     */
+    enemyTrailSpacing: 1.4,
+    /** Seconds a ground breadcrumb mark lingers before it fades out. */
+    enemyTrailLife: 5.0
 } as const
 
 export const OBSTACLES = {
@@ -149,3 +184,106 @@ export const PHYSICS_PRESETS: Record<PhysicsPresetName, PhysicsFeel> = {
 } as const
 
 export const DEFAULT_PHYSICS_PRESET: PhysicsPresetName = 'current'
+
+/* -------------------------------------------------------------------------- */
+/* Movement model (Known issue #4 fix — velocity-driven vs torque-driven)      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How player input becomes motion.
+ * - `torque`  = legacy: input applies spin, friction converts spin→translation.
+ *               Perpetually slips (wheel-spin) because torque exceeds the grip
+ *               ceiling — the "100 RPM but barely moving" feel.
+ * - `velocity`= input drives horizontal velocity DIRECTLY (accel toward a target,
+ *               capped at top speed), and spin is slaved to motion (ω = v/r) so
+ *               the ball rolls 1:1 with the ground, no slip. Airborne hands back
+ *               to Box3D physics. This is the target feel: "influence the ball
+ *               from inside with energy; grip is implicit."
+ */
+export type MovementModel = 'torque' | 'velocity'
+
+export const DEFAULT_MOVEMENT_MODEL: MovementModel = 'velocity'
+
+/** Velocity-driven movement feel (only used when model === 'velocity'). */
+export const MOVEMENT = {
+    /** Horizontal top speed (u/s). */
+    topSpeed: 20,
+    /** Acceleration toward target velocity while input held (u/s²). Higher = snappier turns/starts. */
+    accel: 60,
+    /** Stronger deceleration while braking (shift) (u/s²). */
+    brakeDecel: 90,
+    /** Midair steering authority as a fraction of `accel` (0 = none, physics only). */
+    airControl: 0.15,
+
+    /* --- Coast / drift (no input, grounded) --- */
+    /**
+     * On release the ball coasts: velocity decays by exponential drag (inertia glide)
+     * plus a small constant floor so it fully settles to rest on flat ground. The drag
+     * rate k is interpolated by `driftAmount` (0..1):
+     *   driftAmount 0 → k = coastDragMax  (strong drag, quick stop — old snappy feel)
+     *   driftAmount 1 → k = coastDragMin  (weak drag, long floaty glide)
+     * Exponential (not fixed-rate) decay is what lets downhill roll survive: a fixed
+     * decel would always cancel the slope pull. Terminal downhill speed = (aDown−floor)/k.
+     */
+    coastDragMax: 9.0,
+    coastDragMin: 0.7,
+    /** Constant coast decel (u/s²): guarantees rest on flat + sets the min slope that rolls. */
+    coastFloor: 0.6,
+
+    /* --- Downhill roll (no input, grounded, on a slope) --- */
+    /**
+     * When coasting on a slope, the ball accelerates downhill by g·sinθ scaled by
+     * `downhillRoll` (0..1 = fraction of true gravity along the surface). Read from
+     * the ground contact normal, so it works on terrain AND on top of cubes.
+     */
+    downhillMaxSpeed: 16
+} as const
+
+/**
+ * How the ENEMY turns AI heading into motion.
+ * - `velocity` (default): drive horizontal velocity toward heading·targetSpeed and
+ *   slave spin to motion — same 1:1 roll as the player (Grayson: "same idea").
+ * - `force` (legacy): apply steering force + misalignment braking. Kept for A/B.
+ */
+export type EnemyMovementModel = 'velocity' | 'force'
+export const DEFAULT_ENEMY_MOVEMENT_MODEL: EnemyMovementModel = 'velocity'
+
+/** Coast/drift + downhill defaults (mirrored into the settings store as live sliders). */
+export const DEFAULT_DRIFT = 0.55
+export const DEFAULT_DOWNHILL_ROLL = 0.7
+
+/* -------------------------------------------------------------------------- */
+/* Play-feel presets — one-click bundles of the feel knobs, with character.     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A play-feel preset composes the existing primitives (physics preset + drift +
+ * downhill + jump + enemy speed) into a named, characterful set. Selecting one
+ * writes those store values; nudging any of them afterward flips the preset to
+ * `custom` (same pattern as the graphics preset). `classic` MUST equal the
+ * DEFAULT_SETTINGS feel values so a fresh install reads as "Classic".
+ */
+export interface PlayfeelPreset {
+    label: string
+    blurb: string
+    physicsPreset: PhysicsPresetName
+    playerDrift: number
+    downhillRoll: number
+    jumpHeight: number
+    enemySpeed: number
+}
+
+export type PlayfeelPresetName = 'classic' | 'iceRink' | 'arcade' | 'heavyweight' | 'predator'
+
+export const PLAYFEEL_PRESETS: Record<PlayfeelPresetName, PlayfeelPreset> = {
+    classic:     { label: 'Classic',     blurb: 'Balanced blend — the tuned default.',            physicsPreset: 'blend',     playerDrift: 0.55, downhillRoll: 0.70, jumpHeight: 1.8, enemySpeed: 2.0 },
+    iceRink:     { label: 'Ice Rink',    blurb: 'Slippery: long glides, strong downhill roll.',    physicsPreset: 'blend',     playerDrift: 0.92, downhillRoll: 1.00, jumpHeight: 1.6, enemySpeed: 2.0 },
+    arcade:      { label: 'Arcade',      blurb: 'Light + snappy: quick stops, punchy jump.',       physicsPreset: 'current',   playerDrift: 0.20, downhillRoll: 0.45, jumpHeight: 2.2, enemySpeed: 2.6 },
+    heavyweight: { label: 'Heavyweight', blurb: 'Heavy gravity, grounded, low floaty jump.',       physicsPreset: 'v1Gravity', playerDrift: 0.30, downhillRoll: 0.55, jumpHeight: 1.3, enemySpeed: 2.0 },
+    predator:    { label: 'Predator',    blurb: 'Classic feel, relentless enemy. Hard mode.',      physicsPreset: 'blend',     playerDrift: 0.55, downhillRoll: 0.70, jumpHeight: 1.8, enemySpeed: 3.2 }
+} as const
+
+export const DEFAULT_PLAYFEEL_PRESET: PlayfeelPresetName = 'classic'
+
+/** Store keys a play-feel preset owns — changing any of these flips the preset to `custom`. */
+export const PLAYFEEL_KEYS = ['physicsPreset', 'playerDrift', 'downhillRoll', 'jumpHeight', 'enemySpeed'] as const

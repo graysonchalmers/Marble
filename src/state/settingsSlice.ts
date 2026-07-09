@@ -7,12 +7,13 @@ import {
   V2_PRESET,
   DEFAULT_SETTINGS,
 } from "./persistence";
+import { PLAYFEEL_PRESETS, PLAYFEEL_KEYS } from "../systems/sim/tuning";
 
 export const createSettingsSlice: StateCreator<
   GameStore,
   [],
   [],
-  SettingsState & Pick<GameStore, "setSetting" | "setSettings" | "setSectionState" | "loadPreset" | "loadGraphicsPreset" | "saveRecord">
+  SettingsState & Pick<GameStore, "setSetting" | "setSettings" | "setSectionState" | "loadPreset" | "loadGraphicsPreset" | "applyPlayfeelPreset" | "saveRecord">
 > = (set) => {
   const initialSettings = loadSettings();
 
@@ -27,8 +28,9 @@ export const createSettingsSlice: StateCreator<
         };
 
         // If a settings key is changed (other than activePreset itself), mark preset as custom.
-        // physicsPreset is its own independent selector — changing it must NOT trip activePreset.
-        if (key !== "activePreset" && key !== "physicsPreset" && key in DEFAULT_SETTINGS) {
+        // The Box3D-beta feel knobs are independent dev selectors — changing them must NOT trip activePreset.
+        const BOX3D_FEEL_KEYS = ["physicsPreset", "movementModel", "enemyMovementModel", "playerDrift", "downhillRoll", "jumpHeight"];
+        if (key !== "activePreset" && !BOX3D_FEEL_KEYS.includes(key as string) && key in DEFAULT_SETTINGS) {
           nextState.activePreset = "custom";
         }
 
@@ -36,6 +38,11 @@ export const createSettingsSlice: StateCreator<
         const GRAPHICS_KEYS = ["shadowsEnabled", "pixelRatio", "maxParticles", "physicsRate"];
         if (GRAPHICS_KEYS.includes(key as string)) {
           nextState.graphicsPreset = "custom";
+        }
+
+        // If a play-feel knob is nudged, the play-feel preset becomes "custom".
+        if ((PLAYFEEL_KEYS as readonly string[]).includes(key as string)) {
+          nextState.playfeelPreset = "custom";
         }
 
         // Save persisted settings
@@ -126,6 +133,23 @@ export const createSettingsSlice: StateCreator<
 
         saveSettingsDebounced(nextState);
 
+        return nextState;
+      });
+    },
+
+    applyPlayfeelPreset: (name) => {
+      set((state) => {
+        const p = PLAYFEEL_PRESETS[name];
+        const nextState = {
+          ...state,
+          physicsPreset: p.physicsPreset,
+          playerDrift: p.playerDrift,
+          downhillRoll: p.downhillRoll,
+          jumpHeight: p.jumpHeight,
+          enemySpeed: p.enemySpeed,
+          playfeelPreset: name,
+        };
+        saveSettingsDebounced(nextState);
         return nextState;
       });
     },

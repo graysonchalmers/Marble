@@ -82,6 +82,22 @@ export interface SettingsState {
   // Box3D physics feel preset (traction A/B — drives gravity/jump/friction in the Box3D sim)
   physicsPreset: "current" | "frictionOnly" | "v1Gravity" | "blend";
 
+  // Player movement model (Known #4 fix): velocity-driven (default) vs legacy torque-driven
+  movementModel: "torque" | "velocity";
+
+  // Enemy movement model: velocity-driven (default, mirrors the player) vs legacy force steering
+  enemyMovementModel: "velocity" | "force";
+
+  // Feel knobs (velocity model): coast glide/inertia on release (0 snappy stop .. 1 long glide)
+  playerDrift: number;
+  // Downhill roll strength while coasting on a slope (0 off .. 1 = full gravity along the surface)
+  downhillRoll: number;
+  // Jump apex target height in units — impulse derived from height + gravity + mass
+  jumpHeight: number;
+
+  // Play-feel preset (bundles physics/drift/downhill/jump/enemySpeed); "custom" once any is nudged
+  playfeelPreset: "classic" | "iceRink" | "arcade" | "heavyweight" | "predator" | "custom";
+
   // Records
   personalBest: number;
   personalRecords: PersonalRecord[];
@@ -118,6 +134,7 @@ export interface GameStoreActions {
   setSectionState: (section: string, isOpen: boolean) => void;
   loadPreset: (presetName: "v1" | "v2") => void;
   loadGraphicsPreset: (presetName: "low" | "medium" | "high" | "ultra") => void;
+  applyPlayfeelPreset: (name: "classic" | "iceRink" | "arcade" | "heavyweight" | "predator") => void;
   saveRecord: (score: number) => void;
 
   // Session Actions

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useGameStore } from '../../store/useGameStore'
+import { PLAYFEEL_PRESETS } from '../../systems/sim/tuning'
 
 export function UnifiedDebugMenu() {
     const useV2AI = useGameStore(s => s.useV2AI)
@@ -10,6 +11,13 @@ export function UnifiedDebugMenu() {
     const audioDebugMode = useGameStore(s => s.audioDebugMode)
     const setAudioDebugMode = (val: { closingEnabled: boolean, openingEnabled: boolean }) => useGameStore.setState({ audioDebugMode: val })
     const physicsPreset = useGameStore(s => s.physicsPreset)
+    const movementModel = useGameStore(s => s.movementModel)
+    const enemyMovementModel = useGameStore(s => s.enemyMovementModel)
+    const playerDrift = useGameStore(s => s.playerDrift)
+    const downhillRoll = useGameStore(s => s.downhillRoll)
+    const jumpHeight = useGameStore(s => s.jumpHeight)
+    const playfeelPreset = useGameStore(s => s.playfeelPreset)
+    const applyPlayfeelPreset = useGameStore(s => s.applyPlayfeelPreset)
     const setSetting = useGameStore(s => s.setSetting)
 
     // Default to OPEN
@@ -153,6 +161,46 @@ export function UnifiedDebugMenu() {
 
                     <div className="debug-divider" />
 
+                    {/* Section: Play-Feel presets (one-click feel bundles) */}
+                    <div style={{ marginBottom: '12px' }}>
+                        <div className="debug-section-title">
+                            Play-Feel
+                        </div>
+                        <div className="debug-row" style={{ alignItems: 'center' }}>
+                            <span>Preset</span>
+                            <select
+                                value={playfeelPreset}
+                                onChange={(e) => {
+                                    if (e.target.value !== 'custom') {
+                                        applyPlayfeelPreset(e.target.value as Parameters<typeof applyPlayfeelPreset>[0])
+                                    }
+                                }}
+                                style={{
+                                    background: 'rgba(255,255,255,0.08)',
+                                    border: '1px solid #444',
+                                    color: '#fff',
+                                    borderRadius: '4px',
+                                    padding: '2px 6px',
+                                    fontSize: '11px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                {Object.entries(PLAYFEEL_PRESETS).map(([key, p]) => (
+                                    <option key={key} value={key}>{p.label}</option>
+                                ))}
+                                <option value="custom" disabled>Custom (edited)</option>
+                            </select>
+                        </div>
+                        <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
+                            {playfeelPreset === 'custom'
+                                ? 'Custom — tweaked from a preset.'
+                                : PLAYFEEL_PRESETS[playfeelPreset]?.blurb}
+                            {' '}Sets physics + drift + downhill + jump + enemy speed. Physics change resets the round.
+                        </div>
+                    </div>
+
+                    <div className="debug-divider" />
+
                     {/* Section: Physics Feel (traction A/B — applies on rebuild) */}
                     <div style={{ marginBottom: '12px' }}>
                         <div className="debug-section-title">
@@ -180,7 +228,105 @@ export function UnifiedDebugMenu() {
                             </select>
                         </div>
                         <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
-                            Changing rebuilds the arena (resets the round). Fixes ground traction — Known #4.
+                            Changing rebuilds the arena (resets the round). Gravity + jump affect both models; friction only bites the torque model.
+                        </div>
+                    </div>
+
+                    <div className="debug-divider" />
+
+                    {/* Section: Movement Model (Known #4 fix — live A/B, no rebuild) */}
+                    <div style={{ marginBottom: '12px' }}>
+                        <div className="debug-section-title">
+                            Movement Model
+                        </div>
+                        <div className="debug-row" style={{ alignItems: 'center' }}>
+                            <span>Model</span>
+                            <select
+                                value={movementModel}
+                                onChange={(e) => setSetting('movementModel', e.target.value as typeof movementModel)}
+                                style={{
+                                    background: 'rgba(255,255,255,0.08)',
+                                    border: '1px solid #444',
+                                    color: '#fff',
+                                    borderRadius: '4px',
+                                    padding: '2px 6px',
+                                    fontSize: '11px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <option value="velocity">Velocity (1:1 roll)</option>
+                                <option value="torque">Torque (legacy)</option>
+                            </select>
+                        </div>
+                        <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
+                            Live toggle (no rebuild). Velocity = drive the ball directly, spin follows motion. Torque = old wheel-spin model.
+                        </div>
+
+                        {/* Enemy movement model — mirrors the player's velocity drive */}
+                        <div className="debug-row" style={{ alignItems: 'center', marginTop: '8px' }}>
+                            <span>Enemy</span>
+                            <select
+                                value={enemyMovementModel}
+                                onChange={(e) => setSetting('enemyMovementModel', e.target.value as typeof enemyMovementModel)}
+                                style={{
+                                    background: 'rgba(255,255,255,0.08)',
+                                    border: '1px solid #444',
+                                    color: '#fff',
+                                    borderRadius: '4px',
+                                    padding: '2px 6px',
+                                    fontSize: '11px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <option value="velocity">Velocity (same as player)</option>
+                                <option value="force">Force (legacy)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="debug-divider" />
+
+                    {/* Section: Feel Tuning (velocity model — all live, no rebuild) */}
+                    <div style={{ marginBottom: '12px' }}>
+                        <div className="debug-section-title">
+                            Feel Tuning
+                        </div>
+
+                        {/* Drift / glide on release */}
+                        <div className="debug-row" style={{ alignItems: 'center' }}>
+                            <span>Drift</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{playerDrift.toFixed(2)}</span>
+                        </div>
+                        <input
+                            type="range" min={0} max={1} step={0.05} value={playerDrift}
+                            onChange={(e) => setSetting('playerDrift', parseFloat(e.target.value))}
+                            style={{ width: '100%' }}
+                        />
+
+                        {/* Downhill roll strength */}
+                        <div className="debug-row" style={{ alignItems: 'center', marginTop: '6px' }}>
+                            <span>Downhill Roll</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{downhillRoll.toFixed(2)}</span>
+                        </div>
+                        <input
+                            type="range" min={0} max={1} step={0.05} value={downhillRoll}
+                            onChange={(e) => setSetting('downhillRoll', parseFloat(e.target.value))}
+                            style={{ width: '100%' }}
+                        />
+
+                        {/* Jump apex height (u) */}
+                        <div className="debug-row" style={{ alignItems: 'center', marginTop: '6px' }}>
+                            <span>Jump Height</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{jumpHeight.toFixed(1)}u</span>
+                        </div>
+                        <input
+                            type="range" min={0.5} max={5} step={0.1} value={jumpHeight}
+                            onChange={(e) => setSetting('jumpHeight', parseFloat(e.target.value))}
+                            style={{ width: '100%' }}
+                        />
+
+                        <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
+                            Drift = glide/inertia on release. Downhill Roll = how hard gravity pulls the ball down slopes when idle. Jump Height = apex in units (~1.8 clears the enemy ball).
                         </div>
                     </div>
 

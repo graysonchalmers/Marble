@@ -24,6 +24,8 @@ import { SonarSystem } from '../../systems/sonar/SonarSystem'
 import { MarbleSim, type SimInput } from '../../systems/sim/MarbleSim'
 import { SIM_RATE_HZ, TERRAIN, PHYSICS_PRESETS } from '../../systems/sim/tuning'
 import { getStateVisuals, type EnemyState } from '../../systems/ai/EnemyAI'
+import { CubeOcclusion } from './CubeOcclusion'
+import { Box3DParticles, dispatchFx } from './Box3DParticles'
 
 // Terrain constants (physics reads these via tuning.ts; visuals share them here)
 const WIDTH = TERRAIN.width
@@ -141,6 +143,11 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
 
     const [currentState, setCurrentState] = useState<EnemyState>('idle')
 
+    // Early-release latch: set true the first frame the player presses a control key
+    // during the countdown, so they break free for a head start (enemy stays frozen).
+    // Reset whenever we (re)enter setup/countdown.
+    const earlyReleasedRef = useRef(false)
+
     // --- The single fixed-timestep loop: sim → rules → sonar ---
     const loop = useMemo(() => new GameLoop({ simRate: SIM_RATE_HZ }), [])
     const sonarSystem = useMemo(() => new SonarSystem(sim.playerPosRef, sim.enemyPosRef), [sim])
@@ -150,14 +157,35 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
     useEffect(() => {
         const tickSim = (dt: number) => {
             const s = useGameStore.getState()
-            if (s.gameState === 'setup' || s.gameState === 'countdown') {
+            const params = {
+                enemySpeed: s.enemySpeed,
+                enemyAirControl: s.enemyAirControl,
+                movementModel: s.movementModel,
+                enemyMovementModel: s.enemyMovementModel,
+                playerDrift: s.playerDrift,
+                downhillRoll: s.downhillRoll,
+                jumpHeight: s.jumpHeight
+            }
+            if (s.gameState === 'setup') {
                 sim.resetPositions()
                 return
             }
-            sim.step(dt, keys.current, {
-                enemySpeed: s.enemySpeed,
-                enemyAirControl: s.enemyAirControl
-            })
+            if (s.gameState === 'countdown') {
+                // Early release: the first control-key press during the countdown breaks the
+                // player free for a head start; the enemy stays pinned at spawn (freezeEnemy)
+                // until the timer hits zero and RulesSystem flips gameState to 'playing'.
+                const k = keys.current
+                if (!earlyReleasedRef.current && (k.w || k.a || k.s || k.d || k.space)) {
+                    earlyReleasedRef.current = true
+                }
+                if (!earlyReleasedRef.current) {
+                    sim.resetPositions()
+                    return
+                }
+                sim.step(dt, k, { ...params, freezeEnemy: true })
+                return
+            }
+            sim.step(dt, keys.current, params)
         }
         const tickRules = (dt: number) => rulesSystem.tick(dt)
         const tickSonar = (dt: number) => sonarSystem.tick(dt)
@@ -195,6 +223,7 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
             loop.reset()
             rulesSystem.reset()
             sonarSystem.reset()
+            earlyReleasedRef.current = false
         }
     }, [gameState, loop, sonarSystem])
 
@@ -209,6 +238,12 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
     const tempTargetCamPos = useRef(new THREE.Vector3())
     const tempOffset = useRef(new THREE.Vector3())
     const uiSyncClock = useRef(0)
+
+    // Live interpolated player render position, shared with occlusion + particles.
+    const playerRenderPosRef = useRef(new THREE.Vector3())
+
+    // Live interpolated enemy render position, shared with particles (enemy roll trail + ground breadcrumb).
+    const enemyRenderPosRef = useRef(new THREE.Vector3())
 
     // Procedural terrain mesh (visual)
     const geom = useMemo(() => {
@@ -302,6 +337,7 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
             tempQuat.current.slerpQuaternions(sim.playerPrev.quaternion, sim.playerCurr.quaternion, alpha)
             sphereRef.current.position.copy(tempPos.current)
             sphereRef.current.quaternion.copy(tempQuat.current)
+            playerRenderPosRef.current.copy(tempPos.current)
         }
 
         if (enemyRef.current) {
@@ -309,6 +345,7 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
             tempQuat.current.slerpQuaternions(sim.enemyPrev.quaternion, sim.enemyCurr.quaternion, alpha)
             enemyRef.current.position.copy(tempPos.current)
             enemyRef.current.quaternion.copy(tempQuat.current)
+            enemyRenderPosRef.current.copy(tempPos.current)
         }
 
         // --- Camera follow (render-side smoothing) ---
@@ -426,6 +463,20 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
                 />
             </mesh>
 
+            {/* See-through cubes: fade obstacles blocking the camera→player sightline */}
+            {sim.cubePositions.length > 0 && (
+                <CubeOcclusion
+                    cubesRef={cubesRef}
+                    centers={sim.cubePositions}
+                    cubeScale={sim.cubeScale}
+                    texture={cubeTexture}
+                    playerPosRef={playerRenderPosRef}
+                />
+            )}
+
+            {/* Cosmetic particle FX: player + enemy roll trails, impact/landing bursts, enemy ground breadcrumb */}
+            <Box3DParticles sim={sim} playerPosRef={playerRenderPosRef} enemyPosRef={enemyRenderPosRef} />
+
             {/* Fog background color matched to sky horizon */}
             <color attach="background" args={["#cbdbe6"]} />
             <fog attach="fog" args={["#cbdbe6", 30, 110]} />
@@ -449,6 +500,14 @@ export function Box3DScene() {
     const [sim, setSim] = useState<MarbleSim | null>(null)
     // Physics feel preset (traction A/B). Reactive so changing it rebuilds the world+sim below.
     const physicsPreset = useGameStore(s => s.physicsPreset)
+
+    // Render-loop gating: while paused or on the game-over screen the sim is frozen, so
+    // there's nothing new to draw. Switch R3F to on-demand rendering to stop the GPU
+    // spinning a static frame ~60×/s; it renders one last frame then idles the rAF loop
+    // until we flip back to 'always'. This is the "stop updating graphics to save perf" ask.
+    const isPaused = useGameStore(s => s.isPaused)
+    const gameState = useGameStore(s => s.gameState)
+    const frozen = isPaused || gameState === 'gameover'
 
     // Input captured into a ref — zero React re-renders on keypress.
     const keys = useRef<SimInput>({ w: false, a: false, s: false, d: false, space: false, shift: false })
@@ -531,7 +590,9 @@ export function Box3DScene() {
                         simStateListeners.get(simInstance)?.(next)
                         if (prev === 'idle' && next === 'alert') soundManager.playAlertSound()
                         if (prev === 'chase' && next === 'search') soundManager.playLostSound()
-                    }
+                    },
+                    onLand: (x, y, z, s) => dispatchFx(simInstance, { type: 'land', x, y, z, strength: s }),
+                    onImpact: (x, y, z, s) => dispatchFx(simInstance, { type: 'impact', x, y, z, strength: s })
                 }
             })
 
@@ -568,7 +629,7 @@ export function Box3DScene() {
     }
 
     return (
-        <Canvas camera={{ position: [0, 8, 12], fov: 45 }} shadows>
+        <Canvas camera={{ position: [0, 8, 12], fov: 45 }} shadows frameloop={frozen ? 'demand' : 'always'}>
             <Box3DPlayableScene sim={sim} keys={keys} heights={heights} />
         </Canvas>
     )

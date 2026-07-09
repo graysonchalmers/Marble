@@ -61,7 +61,15 @@ export const DEFAULT_SETTINGS: SettingsState = {
   audioPitchModulation: 4,
   audioStrategy: "drone",
   activePreset: "v2",
-  physicsPreset: "current",
+  // Baseline physics feel = blend (C): gravity -15, playtested-good with the velocity model.
+  physicsPreset: "blend",
+  movementModel: "velocity",
+  enemyMovementModel: "velocity",
+  // Keep in sync with tuning.ts DEFAULT_DRIFT / DEFAULT_DOWNHILL_ROLL / PLAYER.jumpHeight.
+  playerDrift: 0.55,
+  downhillRoll: 0.7,
+  jumpHeight: 1.8,
+  playfeelPreset: "classic",
 
   personalBest: 0,
   personalRecords: [],
