@@ -38,10 +38,10 @@ export class Box3DWorld implements PhysicsWorldAdapter {
         this.bridge.worldStep(this.worldPtr, dt, 4)
     }
 
-    reset(): void {
+    reset(gravityY: number = -9.81): void {
         this.destroyWorldOnly()
 
-        this.worldPtr = this.bridge.worldCreate(0, -9.81, 0)
+        this.worldPtr = this.bridge.worldCreate(0, gravityY, 0)
         if (!this.worldPtr) {
             throw new Error('Failed to create Box3D world.')
         }

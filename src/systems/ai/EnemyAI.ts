@@ -57,7 +57,8 @@ export function canSeePlayer(
 function generateSearchWaypoints(
     waypoints: THREE.Vector3[],
     lastKnownPos: THREE.Vector3,
-    playerVel: THREE.Vector3
+    playerVel: THREE.Vector3,
+    rand: () => number = Math.random
 ): void {
     // Ensure we have exactly 4 waypoints, if not re-initialize them
     while (waypoints.length < 4) {
@@ -76,7 +77,7 @@ function generateSearchWaypoints(
 
     // Add jitter if speed is low, otherwise trust the velocity
     if (speed < 1) {
-        waypoints[0].add(tempProjected.set((Math.random() - 0.5) * 5, 0, (Math.random() - 0.5) * 5))
+        waypoints[0].add(tempProjected.set((rand() - 0.5) * 5, 0, (rand() - 0.5) * 5))
     }
 
     // 2. Subsequent waypoints: Spiral out from projected pos
@@ -84,7 +85,7 @@ function generateSearchWaypoints(
     const angleStep = Math.PI / 1.5 // Fewer, larger steps
 
     for (let i = 1; i < 4; i++) {
-        const angle = i * angleStep + Math.random() * 1.0
+        const angle = i * angleStep + rand() * 1.0
         waypoints[i].set(
             lastKnownPos.x + Math.cos(angle) * searchRadius,
             lastKnownPos.y,
@@ -102,7 +103,8 @@ export function updateAIState(
     playerVisible: boolean,
     playerPos: THREE.Vector3,
     delta: number,
-    playerVel: THREE.Vector3 // Passed in for smart search
+    playerVel: THREE.Vector3, // Passed in for smart search
+    rand: () => number = Math.random // Seeded stream from MarbleSim for determinism (F9)
 ): EnemyState {
     ai.stateTimer += delta
 
@@ -120,7 +122,7 @@ export function updateAIState(
                 // If lost immediately, go to search instead of idle
                 ai.state = 'search'
                 ai.stateTimer = 0
-                generateSearchWaypoints(ai.searchWaypoints, ai.lastKnownPlayerPos, playerVel)
+                generateSearchWaypoints(ai.searchWaypoints, ai.lastKnownPlayerPos, playerVel, rand)
             } else if (ai.stateTimer >= ALERT_DURATION) {
                 ai.state = 'chase'
                 ai.stateTimer = 0
@@ -134,7 +136,7 @@ export function updateAIState(
             } else {
                 ai.state = 'search'
                 ai.stateTimer = 0
-                generateSearchWaypoints(ai.searchWaypoints, ai.lastKnownPlayerPos, playerVel)
+                generateSearchWaypoints(ai.searchWaypoints, ai.lastKnownPlayerPos, playerVel, rand)
                 ai.currentWaypointIndex = 0
             }
             break
@@ -148,8 +150,8 @@ export function updateAIState(
                 // NEVER GO IDLE - RESTART SEARCH
                 ai.stateTimer = 0
                 // Generate new waypoints from CURRENT position to keep searching effectively
-                tempDir.set(Math.random() - 0.5, 0, Math.random() - 0.5)
-                generateSearchWaypoints(ai.searchWaypoints, ai.lastKnownPlayerPos, tempDir)
+                tempDir.set(rand() - 0.5, 0, rand() - 0.5)
+                generateSearchWaypoints(ai.searchWaypoints, ai.lastKnownPlayerPos, tempDir, rand)
                 ai.currentWaypointIndex = 0
             }
             break

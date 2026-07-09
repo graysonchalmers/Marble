@@ -22,7 +22,7 @@ import { GameLoop } from '../../engine/loop'
 import { rulesSystem } from '../../systems/rules/RulesSystem'
 import { SonarSystem } from '../../systems/sonar/SonarSystem'
 import { MarbleSim, type SimInput } from '../../systems/sim/MarbleSim'
-import { SIM_RATE_HZ, TERRAIN } from '../../systems/sim/tuning'
+import { SIM_RATE_HZ, TERRAIN, PHYSICS_PRESETS } from '../../systems/sim/tuning'
 import { getStateVisuals, type EnemyState } from '../../systems/ai/EnemyAI'
 
 // Terrain constants (physics reads these via tuning.ts; visuals share them here)
@@ -69,6 +69,57 @@ function useGridTexture(colorBg: string, colorGrid: string, gridStep: number = 6
     }, [colorBg, colorGrid, gridStep])
 }
 
+// Higher-fidelity grid texture matching the legacy FallingCubes look (v1 Level.tsx):
+// sharp minor/major line hierarchy at 2048px so edges stay crisp at close range.
+function useCubeGridTexture(colorBg: string, colorGrid: string, gridStep: number = 64) {
+    return useMemo(() => {
+        const RES = 2048
+        const canvas = document.createElement('canvas')
+        canvas.width = RES
+        canvas.height = RES
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+            ctx.fillStyle = colorBg
+            ctx.fillRect(0, 0, RES, RES)
+
+            // Snap gridStep to a clean divisor of 512 for perfect tiling.
+            const numCells = Math.round(512 / gridStep)
+            const adjustedGridStep = 512 / Math.max(1, numCells)
+            const scale = RES / 512
+            const scaledStep = adjustedGridStep * scale
+            const scaledMinorStep = scaledStep / 2
+
+            // Minor lines (subtle).
+            ctx.beginPath()
+            ctx.strokeStyle = colorGrid
+            ctx.globalAlpha = 0.3
+            ctx.lineWidth = 2 * scale
+            for (let i = 0; i <= RES; i += scaledMinorStep) {
+                if (i % scaledStep !== 0) {
+                    ctx.moveTo(i, 0); ctx.lineTo(i, RES)
+                    ctx.moveTo(0, i); ctx.lineTo(RES, i)
+                }
+            }
+            ctx.stroke()
+
+            // Major lines (strong).
+            ctx.beginPath()
+            ctx.globalAlpha = 1.0
+            ctx.lineWidth = 4 * scale
+            for (let i = 0; i <= RES; i += scaledStep) {
+                ctx.moveTo(i, 0); ctx.lineTo(i, RES)
+                ctx.moveTo(0, i); ctx.lineTo(RES, i)
+            }
+            ctx.stroke()
+        }
+        const tex = new THREE.CanvasTexture(canvas)
+        tex.wrapS = THREE.RepeatWrapping
+        tex.wrapT = THREE.RepeatWrapping
+        tex.anisotropy = 16
+        return tex
+    }, [colorBg, colorGrid, gridStep])
+}
+
 type PlayableSceneProps = {
     sim: MarbleSim
     keys: React.MutableRefObject<SimInput>
@@ -78,11 +129,15 @@ type PlayableSceneProps = {
 function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
     const sphereRef = useRef<THREE.Mesh>(null)
     const enemyRef = useRef<THREE.Mesh>(null)
+    const cubesRef = useRef<THREE.InstancedMesh>(null)
 
     // Store settings/state
     const enemySize = useGameStore(s => s.enemySize)
     const gameState = useGameStore(s => s.gameState)
     const isPaused = useGameStore(s => s.isPaused)
+    const cubeGridSize = useGameStore(s => s.cubeGridSize)
+    const cubeColorBg = useGameStore(s => s.cubeColorBg)
+    const cubeColorGrid = useGameStore(s => s.cubeColorGrid)
 
     const [currentState, setCurrentState] = useState<EnemyState>('idle')
 
@@ -173,6 +228,22 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
 
     const terrainTexture = useGridTexture('#1a4d2e', '#4f772d', 64)
     terrainTexture.repeat.set(WIDTH / 4, DEPTH / 4)
+
+    // Cube obstacles: v1-matching grid texture, applied uniformly to every instance.
+    const cubeTexture = useCubeGridTexture(cubeColorBg, cubeColorGrid, cubeGridSize)
+
+    // Cubes are static (never move post-spawn) — set instance matrices once per
+    // sim construction rather than every frame.
+    useEffect(() => {
+        const mesh = cubesRef.current
+        if (!mesh || sim.cubePositions.length === 0) return
+        const matrix = new THREE.Matrix4()
+        sim.cubePositions.forEach((pos, i) => {
+            matrix.setPosition(pos)
+            mesh.setMatrixAt(i, matrix)
+        })
+        mesh.instanceMatrix.needsUpdate = true
+    }, [sim])
 
     const ballTexture = useMemo(() => {
         const canvas = document.createElement('canvas')
@@ -321,6 +392,21 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
                 <meshStandardMaterial map={terrainTexture} roughness={0.7} metalness={0.1} />
             </mesh>
 
+            {/* Cube Obstacles (static, positions set once from sim.cubePositions) */}
+            {sim.cubePositions.length > 0 && (
+                <instancedMesh
+                    ref={cubesRef}
+                    args={[undefined, undefined, sim.cubePositions.length]}
+                    castShadow
+                    receiveShadow
+                >
+                    {/* Physics-authoritative scale from the sim — NOT the live store value,
+                        which can drift from the colliders built at sim construction. */}
+                    <boxGeometry args={[sim.cubeScale, sim.cubeScale, sim.cubeScale]} />
+                    <meshStandardMaterial map={cubeTexture} />
+                </instancedMesh>
+            )}
+
             {/* Player Sphere Visual Mesh */}
             <mesh ref={sphereRef} castShadow>
                 <sphereGeometry args={[0.5, 32, 16]} />
@@ -361,6 +447,8 @@ function subscribeSimEvents(sim: MarbleSim, setState: (s: EnemyState) => void): 
 export function Box3DScene() {
     const [status, setStatus] = useState<{ loaded: boolean; error?: string }>({ loaded: false })
     const [sim, setSim] = useState<MarbleSim | null>(null)
+    // Physics feel preset (traction A/B). Reactive so changing it rebuilds the world+sim below.
+    const physicsPreset = useGameStore(s => s.physicsPreset)
 
     // Input captured into a ref — zero React re-renders on keypress.
     const keys = useRef<SimInput>({ w: false, a: false, s: false, d: false, space: false, shift: false })
@@ -406,14 +494,30 @@ export function Box3DScene() {
             if (!active) return
 
             worldInstance = new Box3DWorld(bridge)
-            worldInstance.reset() // Clears default smoke scene
 
             const storeState = useGameStore.getState()
+            // Resolve the selected physics feel preset. Gravity is applied to the world
+            // here (set at creation); friction + jump ride into the sim via `physics` below.
+            const physics = PHYSICS_PRESETS[storeState.physicsPreset] ?? PHYSICS_PRESETS.current
+
+            worldInstance.reset(physics.gravityY) // Clears default smoke scene + applies preset gravity
 
             const simInstance = new MarbleSim(worldInstance, {
                 heights,
                 enemySize: storeState.enemySize,
                 enemyMass: storeState.enemyMass,
+                physics,
+                // Fresh seed per boot for layout variety; sim.seed records it so a
+                // future replay system can persist and reproduce this exact run (F9).
+                seed: Math.floor(Math.random() * 0x7fffffff),
+                obstacles: {
+                    cubeCount: storeState.cubeCount,
+                    cubeScale: storeState.cubeScale,
+                    // Column fields land in Gate 2 (docs/STATUS.md); zeroed until then.
+                    columnCount: 0,
+                    columnSize: 0,
+                    columnHeight: 0
+                },
                 events: {
                     onTag: () => {
                         const s = useGameStore.getState()
@@ -448,7 +552,7 @@ export function Box3DScene() {
             active = false
             worldInstance?.destroy()
         }
-    }, [heights])
+    }, [heights, physicsPreset])
 
     if (status.error) {
         return (

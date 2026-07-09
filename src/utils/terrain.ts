@@ -1,12 +1,12 @@
+import { TERRAIN } from '../systems/sim/tuning'
+
 /**
  * Utility for O(1) terrain height calculation based on the heightfield mathematical formula.
- * Centered at (0, 0) with width 64, depth 64, and scale 2.
+ * Centered at (0, 0). Dimensions sourced from tuning.ts TERRAIN (single source of truth).
  */
 export function getTerrainHeight(worldX: number, worldZ: number): number {
-    const width = 64
-    const depth = 64
-    const scale = 2
-    
+    const { width, depth, scale } = TERRAIN
+
     // Convert world coordinates to grid coordinates (0..63)
     const x = (worldX + (width * scale) / 2) / scale
     const z = (worldZ + (depth * scale) / 2) / scale

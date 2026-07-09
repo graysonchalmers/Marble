@@ -79,6 +79,9 @@ export interface SettingsState {
   // Preset
   activePreset: "v1" | "v2" | "custom";
 
+  // Box3D physics feel preset (traction A/B — drives gravity/jump/friction in the Box3D sim)
+  physicsPreset: "current" | "frictionOnly" | "v1Gravity" | "blend";
+
   // Records
   personalBest: number;
   personalRecords: PersonalRecord[];

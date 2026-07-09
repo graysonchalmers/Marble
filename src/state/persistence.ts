@@ -61,6 +61,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   audioPitchModulation: 4,
   audioStrategy: "drone",
   activePreset: "v2",
+  physicsPreset: "current",
 
   personalBest: 0,
   personalRecords: [],

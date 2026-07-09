@@ -9,6 +9,8 @@ export function UnifiedDebugMenu() {
     const perfStats = useGameStore(s => s.perfStats)
     const audioDebugMode = useGameStore(s => s.audioDebugMode)
     const setAudioDebugMode = (val: { closingEnabled: boolean, openingEnabled: boolean }) => useGameStore.setState({ audioDebugMode: val })
+    const physicsPreset = useGameStore(s => s.physicsPreset)
+    const setSetting = useGameStore(s => s.setSetting)
 
     // Default to OPEN
     const [isOpen, setIsOpen] = useState(true)
@@ -146,6 +148,39 @@ export function UnifiedDebugMenu() {
                             >
                                 {(audioDebugMode.closingEnabled || audioDebugMode.openingEnabled) ? 'ON' : 'OFF'}
                             </button>
+                        </div>
+                    </div>
+
+                    <div className="debug-divider" />
+
+                    {/* Section: Physics Feel (traction A/B — applies on rebuild) */}
+                    <div style={{ marginBottom: '12px' }}>
+                        <div className="debug-section-title">
+                            Physics Feel
+                        </div>
+                        <div className="debug-row" style={{ alignItems: 'center' }}>
+                            <span>Preset</span>
+                            <select
+                                value={physicsPreset}
+                                onChange={(e) => setSetting('physicsPreset', e.target.value as typeof physicsPreset)}
+                                style={{
+                                    background: 'rgba(255,255,255,0.08)',
+                                    border: '1px solid #444',
+                                    color: '#fff',
+                                    borderRadius: '4px',
+                                    padding: '2px 6px',
+                                    fontSize: '11px',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                <option value="current">Current (baseline)</option>
+                                <option value="frictionOnly">A · Friction only</option>
+                                <option value="v1Gravity">B · v1 gravity</option>
+                                <option value="blend">C · Blend</option>
+                            </select>
+                        </div>
+                        <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
+                            Changing rebuilds the arena (resets the round). Fixes ground traction — Known #4.
                         </div>
                     </div>
 

@@ -99,3 +99,53 @@ export const RULES = {
     /** Fall-off-world reset threshold (y). */
     fallResetY: -25
 } as const
+
+export const OBSTACLES = {
+    /** Radius around the arena center kept clear of all obstacles (spawn zone). */
+    clearRadius: 20,
+    /** Obstacles scatter within this fraction of the terrain's full width/depth. */
+    spawnAreaFactor: 0.8,
+    friction: 0.6,
+    restitution: 0.2
+} as const
+
+/* -------------------------------------------------------------------------- */
+/* Physics feel presets (traction A/B — STATUS.md Known issue #4 + Phase E)    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The four physics values that govern ground traction / weight feel. The marble
+ * is torque-driven, so forward grip = μ · N where N = m · gravity. Lower gravity
+ * (Box3D beta's -9.81 vs v1's -22.5) means ~2.3× weaker friction grip while input
+ * torque is unchanged → the "spins fast, grips slow" feel Grayson reported.
+ *
+ * Two independent levers raise grip: gravity (↑N, the v1-parity path) or friction
+ * μ (↑grip directly, leaves jump/weight feel alone). Presets below isolate them.
+ * Jump impulse is rescaled with gravity to hold jump *height* roughly constant
+ * (h ≈ v²/2g, player mass ≈ 0.52 kg).
+ */
+export interface PhysicsFeel {
+    /** World gravity (set at Box3DWorld creation — see Box3DScene). */
+    gravityY: number
+    /** Upward jump impulse (rescaled with gravity to keep jump height ~constant). */
+    jumpImpulse: number
+    /** Player sphere contact friction. */
+    playerFriction: number
+    /** Terrain + wall contact friction. */
+    terrainFriction: number
+}
+
+export type PhysicsPresetName = 'current' | 'frictionOnly' | 'v1Gravity' | 'blend'
+
+export const PHYSICS_PRESETS: Record<PhysicsPresetName, PhysicsFeel> = {
+    /** Shipped Box3D beta baseline (matches the individual PLAYER/WORLD/TERRAIN values above). */
+    current:      { gravityY: -9.81, jumpImpulse: 7.5,  playerFriction: 0.6,  terrainFriction: 0.5 },
+    /** A — pure grip: keep beta weight, raise μ only. */
+    frictionOnly: { gravityY: -9.81, jumpImpulse: 7.5,  playerFriction: 0.9,  terrainFriction: 0.8 },
+    /** B — v1 parity: v1's heavy gravity, jump rescaled, μ unchanged. */
+    v1Gravity:    { gravityY: -22.5, jumpImpulse: 11.3, playerFriction: 0.6,  terrainFriction: 0.5 },
+    /** C — blend: moderate gravity + moderate μ. */
+    blend:        { gravityY: -15.0, jumpImpulse: 9.3,  playerFriction: 0.75, terrainFriction: 0.65 }
+} as const
+
+export const DEFAULT_PHYSICS_PRESET: PhysicsPresetName = 'current'

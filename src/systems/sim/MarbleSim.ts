@@ -10,8 +10,9 @@
  * - Zero React imports, zero store imports, zero audio imports. Side effects
  *   surface through the `SimEvents` callbacks so tests can run fully headless.
  * - Zero allocations in the step hot path (scratch vectors preallocated).
- * - Deterministic given identical inputs while the AI stays out of `search`
- *   (search waypoint generation is the one remaining Math.random() source).
+ * - Deterministic given identical inputs AND an identical `config.seed`: all
+ *   sim randomness (obstacle scatter, AI search waypoints) draws from one
+ *   seeded mulberry32 stream — no Math.random() anywhere in the sim.
  *
  * Render interpolation: the sim keeps prev/curr transform snapshots for both
  * bodies. The scene lerps prev→curr by the loop's accumulator alpha.
@@ -27,7 +28,10 @@ import {
     type EnemyAIState,
     type EnemyState
 } from '../ai/EnemyAI'
-import { TERRAIN, PLAYER, ENEMY, RULES } from './tuning'
+import { TERRAIN, PLAYER, ENEMY, RULES, OBSTACLES, PHYSICS_PRESETS, DEFAULT_PHYSICS_PRESET } from './tuning'
+import type { PhysicsFeel } from './tuning'
+import { getTerrainHeight } from '../../utils/terrain'
+import { mulberry32, DEFAULT_SIM_SEED } from './rng'
 
 export interface SimInput {
     w: boolean
@@ -51,6 +55,15 @@ export interface SimEvents {
     onAIStateChange?: (prev: EnemyState, next: EnemyState) => void
 }
 
+/** Static obstacle scatter settings (Gate 1: cubes, Gate 2: columns). Omit for no obstacles. */
+export interface ObstacleConfig {
+    cubeCount: number
+    cubeScale: number
+    columnCount: number
+    columnSize: number
+    columnHeight: number
+}
+
 export interface BodySnapshot {
     position: THREE.Vector3
     quaternion: THREE.Quaternion
@@ -64,6 +77,20 @@ export interface MarbleSimConfig {
     playerSpawn?: { x: number; y: number; z: number }
     enemySpawn?: { x: number; y: number; z: number }
     events?: SimEvents
+    /** Static obstacle scatter (cubes + columns). Omitted/zero counts = no obstacles. */
+    obstacles?: ObstacleConfig
+    /**
+     * Seed for ALL sim randomness (obstacle scatter + AI search waypoints).
+     * Record this alongside scripted input to reproduce a run exactly (F9).
+     * Defaults to DEFAULT_SIM_SEED for headless/test determinism.
+     */
+    seed?: number
+    /**
+     * Physics feel values (player/terrain friction + jump impulse). Gravity in this
+     * object is set at Box3DWorld creation by the scene, NOT here. Omit for the
+     * shipped `current` preset — keeps existing callers/tests byte-identical.
+     */
+    physics?: PhysicsFeel
 }
 
 const NO_INPUT: SimInput = { w: false, a: false, s: false, d: false, space: false, shift: false }
@@ -73,6 +100,12 @@ export class MarbleSim {
     readonly playerBodyPtr: number
     readonly enemyBodyPtr: number
     readonly enemySize: number
+    /** The seed this sim was built with — persist it to replay this run. */
+    readonly seed: number
+    /** Physics-authoritative cube edge length (render must use this, not live store values). */
+    readonly cubeScale: number
+    /** Resolved physics feel (friction + jump). Gravity is applied by the scene at world creation. */
+    readonly physics: PhysicsFeel
 
     /** Interpolation snapshots (prev = start of last step, curr = end of last step). */
     readonly playerPrev: BodySnapshot = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() }
@@ -91,6 +124,10 @@ export class MarbleSim {
     /** True once the enemy has tagged the player (cleared by resetPositions). */
     tagged = false
 
+    /** World-space centers of static obstacles, for the scene to render (never move post-spawn). */
+    readonly cubePositions: THREE.Vector3[] = []
+    readonly columnPositions: THREE.Vector3[] = []
+
     private readonly events: SimEvents
     private readonly playerSpawn: { x: number; y: number; z: number }
     private readonly enemySpawn: { x: number; y: number; z: number }
@@ -103,9 +140,16 @@ export class MarbleSim {
     private readonly cachedTarget = new THREE.Vector3()
     private readonly avoidanceForce = new THREE.Vector3()
 
+    /** Single seeded randomness stream for the whole sim (scatter + AI jitter). */
+    private readonly rand: () => number
+
     constructor(world: Box3DWorld, config: MarbleSimConfig) {
         this.world = world
         this.enemySize = config.enemySize
+        this.seed = config.seed ?? DEFAULT_SIM_SEED
+        this.rand = mulberry32(this.seed)
+        this.cubeScale = config.obstacles?.cubeScale ?? 0
+        this.physics = config.physics ?? PHYSICS_PRESETS[DEFAULT_PHYSICS_PRESET]
         this.events = config.events ?? {}
         this.playerSpawn = config.playerSpawn ?? { ...PLAYER.spawn }
         this.enemySpawn = config.enemySpawn ?? { ...ENEMY.spawn }
@@ -126,7 +170,7 @@ export class MarbleSim {
                 TERRAIN.scale,
                 TERRAIN.minHeight,
                 TERRAIN.maxHeight,
-                TERRAIN.friction,
+                this.physics.terrainFriction,
                 TERRAIN.restitution
             )
             // Center the heightfield under the visual mesh at origin.
@@ -137,19 +181,39 @@ export class MarbleSim {
             const halfDepth = (TERRAIN.depth * TERRAIN.scale) / 2
             const wh = TERRAIN.wallHeight
             const th = TERRAIN.wallThickness
-            world.createStaticBox(-halfWidth, wh / 2 - 10, 0, th / 2, wh / 2, halfDepth, TERRAIN.friction, TERRAIN.restitution)
-            world.createStaticBox(halfWidth, wh / 2 - 10, 0, th / 2, wh / 2, halfDepth, TERRAIN.friction, TERRAIN.restitution)
-            world.createStaticBox(0, wh / 2 - 10, -halfDepth, halfWidth, wh / 2, th / 2, TERRAIN.friction, TERRAIN.restitution)
-            world.createStaticBox(0, wh / 2 - 10, halfDepth, halfWidth, wh / 2, th / 2, TERRAIN.friction, TERRAIN.restitution)
+            world.createStaticBox(-halfWidth, wh / 2 - 10, 0, th / 2, wh / 2, halfDepth, this.physics.terrainFriction, TERRAIN.restitution)
+            world.createStaticBox(halfWidth, wh / 2 - 10, 0, th / 2, wh / 2, halfDepth, this.physics.terrainFriction, TERRAIN.restitution)
+            world.createStaticBox(0, wh / 2 - 10, -halfDepth, halfWidth, wh / 2, th / 2, this.physics.terrainFriction, TERRAIN.restitution)
+            world.createStaticBox(0, wh / 2 - 10, halfDepth, halfWidth, wh / 2, th / 2, this.physics.terrainFriction, TERRAIN.restitution)
         } else {
             // Flat headless-test slab.
-            world.createStaticBox(0, 0, 0, 100, 0.5, 100, TERRAIN.friction, TERRAIN.restitution)
+            world.createStaticBox(0, 0, 0, 100, 0.5, 100, this.physics.terrainFriction, TERRAIN.restitution)
+        }
+
+        // --- Static obstacles (cubes + columns), scattered outside the spawn-clear radius ---
+        const obstacles = config.obstacles
+        if (obstacles && obstacles.cubeCount > 0) {
+            for (const { x, z } of this.scatterPoints(obstacles.cubeCount)) {
+                const half = obstacles.cubeScale / 2
+                const y = getTerrainHeight(x, z) + half
+                world.createStaticBox(x, y, z, half, half, half, OBSTACLES.friction, OBSTACLES.restitution)
+                this.cubePositions.push(new THREE.Vector3(x, y, z))
+            }
+        }
+        if (obstacles && obstacles.columnCount > 0) {
+            for (const { x, z } of this.scatterPoints(obstacles.columnCount)) {
+                const halfSize = obstacles.columnSize / 2
+                const halfHeight = obstacles.columnHeight / 2
+                const y = getTerrainHeight(x, z) + halfHeight
+                world.createStaticBox(x, y, z, halfSize, halfHeight, halfSize, OBSTACLES.friction, OBSTACLES.restitution)
+                this.columnPositions.push(new THREE.Vector3(x, y, z))
+            }
         }
 
         // --- Bodies ---
         this.playerBodyPtr = world.createDynamicSphere(
             this.playerSpawn.x, this.playerSpawn.y, this.playerSpawn.z,
-            PLAYER.radius, PLAYER.density, PLAYER.friction, PLAYER.restitution
+            PLAYER.radius, PLAYER.density, this.physics.playerFriction, PLAYER.restitution
         )
         world.setDamping(this.playerBodyPtr, PLAYER.linearDamping, PLAYER.angularDamping)
 
@@ -263,7 +327,7 @@ export class MarbleSim {
         // Jump (sim-time cooldown; was wall-clock setTimeout).
         if (this.jumpCooldownLeft > 0) this.jumpCooldownLeft -= dt
         if (input.space && isGrounded && this.jumpCooldownLeft <= 0) {
-            w.applyLinearImpulseToCenter(this.playerBodyPtr, 0, PLAYER.jumpImpulse, 0)
+            w.applyLinearImpulseToCenter(this.playerBodyPtr, 0, this.physics.jumpImpulse, 0)
             this.jumpCooldownLeft = PLAYER.jumpCooldown
         }
 
@@ -289,7 +353,7 @@ export class MarbleSim {
             }
 
             const prevState = this.aiState.state
-            const newState = updateAIState(this.aiState, canSee, this.playerPosRef.current, ENEMY.aiUpdateInterval, this.playerVel)
+            const newState = updateAIState(this.aiState, canSee, this.playerPosRef.current, ENEMY.aiUpdateInterval, this.playerVel, this.rand)
             if (newState !== this.currentAIState) {
                 this.currentAIState = newState
                 this.events.onAIStateChange?.(prevState, newState)
@@ -386,6 +450,22 @@ export class MarbleSim {
         w.step(dt)
 
         this.syncSnapshots(false)
+    }
+
+    /** Random (x, z) points kept outside OBSTACLES.clearRadius of the arena center. */
+    private scatterPoints(count: number): { x: number; z: number }[] {
+        const points: { x: number; z: number }[] = []
+        const rangeX = TERRAIN.width * TERRAIN.scale * OBSTACLES.spawnAreaFactor
+        const rangeZ = TERRAIN.depth * TERRAIN.scale * OBSTACLES.spawnAreaFactor
+        for (let i = 0; i < count; i++) {
+            let x: number, z: number
+            do {
+                x = (this.rand() - 0.5) * rangeX
+                z = (this.rand() - 0.5) * rangeZ
+            } while (x * x + z * z < OBSTACLES.clearRadius * OBSTACLES.clearRadius)
+            points.push({ x, z })
+        }
+        return points
     }
 
     /** Refresh curr snapshots from the world (and prev too when hard = true). */

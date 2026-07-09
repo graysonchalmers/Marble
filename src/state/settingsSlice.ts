@@ -26,8 +26,9 @@ export const createSettingsSlice: StateCreator<
           [key]: value,
         };
 
-        // If a settings key is changed (other than activePreset itself), mark preset as custom
-        if (key !== "activePreset" && key in DEFAULT_SETTINGS) {
+        // If a settings key is changed (other than activePreset itself), mark preset as custom.
+        // physicsPreset is its own independent selector — changing it must NOT trip activePreset.
+        if (key !== "activePreset" && key !== "physicsPreset" && key in DEFAULT_SETTINGS) {
           nextState.activePreset = "custom";
         }
 
