@@ -1,4 +1,5 @@
 import type { SettingsState } from "./types";
+import { MOVEMENT, ENEMY } from "../systems/sim/tuning";
 
 const STORAGE_KEY = "MARBLE_GAME_SETTINGS_V2";
 const SCHEMA_VERSION = 3;
@@ -63,12 +64,17 @@ export const DEFAULT_SETTINGS: SettingsState = {
   activePreset: "v2",
   // Baseline physics feel = blend (C): gravity -15, playtested-good with the velocity model.
   physicsPreset: "blend",
-  movementModel: "velocity",
-  enemyMovementModel: "velocity",
   // Keep in sync with tuning.ts DEFAULT_DRIFT / DEFAULT_DOWNHILL_ROLL / PLAYER.jumpHeight.
   playerDrift: 0.55,
   downhillRoll: 0.7,
   jumpHeight: 1.8,
+  // Velocity-model movement knobs — sourced from tuning.ts so the slider defaults can't drift.
+  moveTopSpeed: MOVEMENT.topSpeed,
+  moveAccel: MOVEMENT.accel,
+  moveBrakeDecel: MOVEMENT.brakeDecel,
+  moveAirControl: MOVEMENT.airControl,
+  enemyVelUnit: ENEMY.velUnit,
+  enemyVelAccel: ENEMY.velAccel,
   playfeelPreset: "classic",
 
   personalBest: 0,

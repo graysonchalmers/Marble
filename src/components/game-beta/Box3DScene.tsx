@@ -160,11 +160,15 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
             const params = {
                 enemySpeed: s.enemySpeed,
                 enemyAirControl: s.enemyAirControl,
-                movementModel: s.movementModel,
-                enemyMovementModel: s.enemyMovementModel,
                 playerDrift: s.playerDrift,
                 downhillRoll: s.downhillRoll,
-                jumpHeight: s.jumpHeight
+                jumpHeight: s.jumpHeight,
+                moveTopSpeed: s.moveTopSpeed,
+                moveAccel: s.moveAccel,
+                moveBrakeDecel: s.moveBrakeDecel,
+                moveAirControl: s.moveAirControl,
+                enemyVelUnit: s.enemyVelUnit,
+                enemyVelAccel: s.enemyVelAccel
             }
             if (s.gameState === 'setup') {
                 sim.resetPositions()

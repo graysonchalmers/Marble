@@ -42,23 +42,7 @@ export const PLAYER = {
     angularDamping: 0.4,
     spawn: { x: 0, y: 6, z: 0 },
 
-    /** Input roll torque. */
-    torque: 18.0,
-    /** Torque multiplier when reversing spin direction (snappy turnarounds). */
-    directionChangeBoost: 4.5,
-    /** Torque scale while airborne. */
-    airControl: 0.25,
-    /** Counter-torque factor while braking (shift). */
-    brakeTorqueFactor: 12.0,
-    /** Linear impulse factor while braking. */
-    brakeImpulseFactor: 0.15,
-    /** Passive spin decay torque factor when no input on ground. */
-    idleSpinDamping: 2.0,
-    /** Horizontal speed soft cap (u/s). */
-    topSpeed: 22,
-    /** Exponential decay rate applied above topSpeed. */
-    topSpeedDecayRate: 15,
-    /** Upward jump impulse (legacy/torque path + preset contract; velocity model derives impulse from jumpHeight). */
+    /** Upward jump impulse — vestigial (velocity model derives impulse from jumpHeight); retained for the PhysicsFeel preset contract + its parity test. */
     jumpImpulse: 7.5,
     /**
      * Target jump apex height in world units (velocity model). Impulse is derived
@@ -80,8 +64,6 @@ export const ENEMY = {
     angularDamping: 0.3,
     spawn: { x: 0, y: 20, z: -15 },
 
-    /** Force = enemySpeed(setting) * stateSpeedMultiplier * this * groundControl. */
-    forceFactor: 15,
     /** Vision raycast max distance (u). */
     visionDistance: 40,
     /** Extra probe length past enemy radius for grounding. */
@@ -92,10 +74,6 @@ export const ENEMY = {
     /** Avoidance steering deflection (rad) and strength. */
     avoidAngle: Math.PI / 3,
     avoidStrength: 20,
-    /** Braking when velocity misaligned with heading (force model only). */
-    brakeAlignmentThreshold: 0.3,
-    brakeStrengthFactor: 0.5,
-    minSpeedForBraking: 2,
     /** AI decision rate (s). Deterministic sim-time accumulator, not wall clock. */
     aiUpdateInterval: 0.1,
 
@@ -149,62 +127,54 @@ export const OBSTACLES = {
 /* -------------------------------------------------------------------------- */
 
 /**
- * The four physics values that govern ground traction / weight feel. The marble
- * is torque-driven, so forward grip = μ · N where N = m · gravity. Lower gravity
- * (Box3D beta's -9.81 vs v1's -22.5) means ~2.3× weaker friction grip while input
- * torque is unchanged → the "spins fast, grips slow" feel Grayson reported.
- *
- * Two independent levers raise grip: gravity (↑N, the v1-parity path) or friction
- * μ (↑grip directly, leaves jump/weight feel alone). Presets below isolate them.
+ * Physics-feel presets — the surviving lever under the velocity model is GRAVITY
+ * (it drives fall speed, jump-impulse rescale, and downhill roll). Friction is now
+ * largely vestigial (velocity control overrides grounded traction) but retained on
+ * the preset so collisions/airborne contact stay tuned and the contract is complete.
  * Jump impulse is rescaled with gravity to hold jump *height* roughly constant
  * (h ≈ v²/2g, player mass ≈ 0.52 kg).
+ *
+ * These carry the gravity variety the Play-Feel presets compose (Arcade=current light,
+ * Heavyweight=v1Gravity heavy, Classic/Ice/Predator=blend). The `frictionOnly` A/B
+ * preset was retired session 12 — under the velocity model it was a no-op duplicate
+ * of `current` (same gravity; friction ignored while grounded).
  */
 export interface PhysicsFeel {
     /** World gravity (set at Box3DWorld creation — see Box3DScene). */
     gravityY: number
     /** Upward jump impulse (rescaled with gravity to keep jump height ~constant). */
     jumpImpulse: number
-    /** Player sphere contact friction. */
+    /** Player sphere contact friction (vestigial under velocity model — collisions/airborne only). */
     playerFriction: number
-    /** Terrain + wall contact friction. */
+    /** Terrain + wall contact friction (vestigial under velocity model). */
     terrainFriction: number
 }
 
-export type PhysicsPresetName = 'current' | 'frictionOnly' | 'v1Gravity' | 'blend'
+export type PhysicsPresetName = 'current' | 'v1Gravity' | 'blend'
 
 export const PHYSICS_PRESETS: Record<PhysicsPresetName, PhysicsFeel> = {
-    /** Shipped Box3D beta baseline (matches the individual PLAYER/WORLD/TERRAIN values above). */
+    /** Light: Box3D beta baseline gravity (matches the individual PLAYER/WORLD/TERRAIN values above). */
     current:      { gravityY: -9.81, jumpImpulse: 7.5,  playerFriction: 0.6,  terrainFriction: 0.5 },
-    /** A — pure grip: keep beta weight, raise μ only. */
-    frictionOnly: { gravityY: -9.81, jumpImpulse: 7.5,  playerFriction: 0.9,  terrainFriction: 0.8 },
-    /** B — v1 parity: v1's heavy gravity, jump rescaled, μ unchanged. */
+    /** Heavy: v1 parity — v1's heavy gravity, jump rescaled to hold height. */
     v1Gravity:    { gravityY: -22.5, jumpImpulse: 11.3, playerFriction: 0.6,  terrainFriction: 0.5 },
-    /** C — blend: moderate gravity + moderate μ. */
+    /** Blend: moderate gravity — the tuned default baseline. */
     blend:        { gravityY: -15.0, jumpImpulse: 9.3,  playerFriction: 0.75, terrainFriction: 0.65 }
 } as const
 
 export const DEFAULT_PHYSICS_PRESET: PhysicsPresetName = 'current'
 
 /* -------------------------------------------------------------------------- */
-/* Movement model (Known issue #4 fix — velocity-driven vs torque-driven)      */
+/* Movement (velocity-driven — the sole model since session 12)                */
 /* -------------------------------------------------------------------------- */
 
 /**
- * How player input becomes motion.
- * - `torque`  = legacy: input applies spin, friction converts spin→translation.
- *               Perpetually slips (wheel-spin) because torque exceeds the grip
- *               ceiling — the "100 RPM but barely moving" feel.
- * - `velocity`= input drives horizontal velocity DIRECTLY (accel toward a target,
- *               capped at top speed), and spin is slaved to motion (ω = v/r) so
- *               the ball rolls 1:1 with the ground, no slip. Airborne hands back
- *               to Box3D physics. This is the target feel: "influence the ball
- *               from inside with energy; grip is implicit."
+ * Player input drives horizontal velocity DIRECTLY (accel toward a target, capped
+ * at top speed), and spin is slaved to motion (ω = v/r) so the ball rolls 1:1 with
+ * the ground, no slip. Airborne hands back to Box3D physics. This is the target
+ * feel Grayson signed off on ("influence the ball from inside with energy; grip is
+ * implicit"). The legacy torque model (input=spin, friction converts it) was retired
+ * in session 12 after the velocity model won the Known-#4 A/B decisively.
  */
-export type MovementModel = 'torque' | 'velocity'
-
-export const DEFAULT_MOVEMENT_MODEL: MovementModel = 'velocity'
-
-/** Velocity-driven movement feel (only used when model === 'velocity'). */
 export const MOVEMENT = {
     /** Horizontal top speed (u/s). */
     topSpeed: 20,
@@ -240,13 +210,10 @@ export const MOVEMENT = {
 } as const
 
 /**
- * How the ENEMY turns AI heading into motion.
- * - `velocity` (default): drive horizontal velocity toward heading·targetSpeed and
- *   slave spin to motion — same 1:1 roll as the player (Grayson: "same idea").
- * - `force` (legacy): apply steering force + misalignment braking. Kept for A/B.
+ * The ENEMY runs the SAME velocity drive as the player (Grayson: "same idea"): drive
+ * horizontal velocity toward heading·targetSpeed and slave spin to motion. The legacy
+ * force-steering model was retired in session 12 alongside the player torque model.
  */
-export type EnemyMovementModel = 'velocity' | 'force'
-export const DEFAULT_ENEMY_MOVEMENT_MODEL: EnemyMovementModel = 'velocity'
 
 /** Coast/drift + downhill defaults (mirrored into the settings store as live sliders). */
 export const DEFAULT_DRIFT = 0.55

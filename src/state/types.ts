@@ -80,13 +80,7 @@ export interface SettingsState {
   activePreset: "v1" | "v2" | "custom";
 
   // Box3D physics feel preset (traction A/B — drives gravity/jump/friction in the Box3D sim)
-  physicsPreset: "current" | "frictionOnly" | "v1Gravity" | "blend";
-
-  // Player movement model (Known #4 fix): velocity-driven (default) vs legacy torque-driven
-  movementModel: "torque" | "velocity";
-
-  // Enemy movement model: velocity-driven (default, mirrors the player) vs legacy force steering
-  enemyMovementModel: "velocity" | "force";
+  physicsPreset: "current" | "v1Gravity" | "blend";
 
   // Feel knobs (velocity model): coast glide/inertia on release (0 snappy stop .. 1 long glide)
   playerDrift: number;
@@ -94,6 +88,16 @@ export interface SettingsState {
   downhillRoll: number;
   // Jump apex target height in units — impulse derived from height + gravity + mass
   jumpHeight: number;
+
+  // Velocity-model movement knobs (live, no rebuild) — mirror tuning.ts MOVEMENT.*
+  moveTopSpeed: number;   // horizontal top speed (u/s)
+  moveAccel: number;      // accel toward target velocity (u/s²) — snappiness
+  moveBrakeDecel: number; // decel while braking / shift (u/s²)
+  moveAirControl: number; // midair steering authority as a fraction of accel (0..1)
+
+  // Enemy velocity-drive knobs (live) — mirror tuning.ts ENEMY.velUnit / velAccel
+  enemyVelUnit: number;   // enemy top-speed unit: chaseSpeed = enemySpeed · stateMult · velUnit
+  enemyVelAccel: number;  // enemy accel toward its target velocity (u/s²)
 
   // Play-feel preset (bundles physics/drift/downhill/jump/enemySpeed); "custom" once any is nudged
   playfeelPreset: "classic" | "iceRink" | "arcade" | "heavyweight" | "predator" | "custom";

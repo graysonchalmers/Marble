@@ -15,9 +15,9 @@ import {
  * consumes `physics.gravityY`, so the values here must stay coherent.
  */
 describe('PHYSICS_PRESETS', () => {
-    const names: PhysicsPresetName[] = ['current', 'frictionOnly', 'v1Gravity', 'blend']
+    const names: PhysicsPresetName[] = ['current', 'v1Gravity', 'blend']
 
-    it('exposes exactly the four expected presets', () => {
+    it('exposes exactly the three expected presets', () => {
         expect(Object.keys(PHYSICS_PRESETS).sort()).toEqual([...names].sort())
     })
 
@@ -43,18 +43,11 @@ describe('PHYSICS_PRESETS', () => {
         }
     })
 
-    it('isolates its lever vs the baseline (A = friction only, B = gravity only)', () => {
+    it('v1Gravity isolates the gravity lever (heavier weight, rescaled jump, friction untouched)', () => {
         const base = PHYSICS_PRESETS.current
-        const a = PHYSICS_PRESETS.frictionOnly
         const b = PHYSICS_PRESETS.v1Gravity
 
-        // A raises grip without touching weight/jump.
-        expect(a.gravityY).toBe(base.gravityY)
-        expect(a.jumpImpulse).toBe(base.jumpImpulse)
-        expect(a.playerFriction).toBeGreaterThan(base.playerFriction)
-        expect(a.terrainFriction).toBeGreaterThan(base.terrainFriction)
-
-        // B raises weight (and rescales jump) without touching friction.
+        // Raises weight (and rescales jump to hold height) without touching friction.
         expect(b.gravityY).toBeLessThan(base.gravityY)          // more negative = heavier
         expect(b.jumpImpulse).toBeGreaterThan(base.jumpImpulse) // rescaled up to hold height
         expect(b.playerFriction).toBe(base.playerFriction)

@@ -42,7 +42,7 @@ globalObj.window = globalThis
 globalObj.createMarbleBox3DBridgeModule = createMarbleBox3DBridgeModule
 
 const NO_INPUT: SimInput = { w: false, a: false, s: false, d: false, space: false, shift: false }
-const VEL_PARAMS: SimParams = { enemySpeed: 0, enemyAirControl: 0, movementModel: 'velocity' }
+const VEL_PARAMS: SimParams = { enemySpeed: 0, enemyAirControl: 0 }
 
 async function bootWorld(): Promise<Box3DWorld> {
     const status = await loadBox3DBridge()
@@ -174,7 +174,7 @@ describe('Downhill roll (coast on a slope)', () => {
                 enemySpawn: { x: 80, y: 30, z: 80 } // inert (enemySpeed 0), far away
             })
             const params: SimParams = {
-                enemySpeed: 0, enemyAirControl: 0, movementModel: 'velocity',
+                enemySpeed: 0, enemyAirControl: 0,
                 downhillRoll, playerDrift: 0.6
             }
             for (let i = 0; i < STEPS; i++) sim.step(FIXED_DT, NO_INPUT, params)
@@ -238,8 +238,8 @@ describe('Enemy velocity model (same drive as the player)', () => {
             playerSpawn: { x: 0, y: 1.0, z: 0 },
             enemySpawn: { x: 0, y: 0.5 + s.enemySize, z: -15 } // within vision (40u)
         })
-        // enemyMovementModel omitted → defaults to 'velocity'; player stationary.
-        const params: SimParams = { enemySpeed: s.enemySpeed, enemyAirControl: 0, movementModel: 'velocity' }
+        // Enemy runs the velocity drive (the only model since session 12); player stationary.
+        const params: SimParams = { enemySpeed: s.enemySpeed, enemyAirControl: 0 }
 
         const startDist = sim.enemyCurr.position.distanceTo(sim.playerCurr.position)
 
@@ -270,7 +270,7 @@ describe('Countdown early-release (freezeEnemy pins the enemy)', () => {
     it('keeps the enemy at spawn while the player drives, vs chasing when unfrozen', async () => {
         const s = useGameStore.getState()
         const FWD: SimInput = { ...NO_INPUT, w: true }
-        const params: SimParams = { enemySpeed: 2, enemyAirControl: 0, movementModel: 'velocity' }
+        const params: SimParams = { enemySpeed: 2, enemyAirControl: 0 }
 
         // Frozen: enemy stays put even though it can see the player (z=-15 < 40u vision).
         const w1 = await bootWorld()
@@ -336,9 +336,60 @@ describe('Cosmetic FX events (render-only, do not affect determinism)', () => {
             events: { onImpact: () => { impacts++ } }
         })
         const DRIVE: SimInput = { ...NO_INPUT, d: true } // +X into the wall
-        const params: SimParams = { enemySpeed: 0, enemyAirControl: 0, movementModel: 'velocity' }
+        const params: SimParams = { enemySpeed: 0, enemyAirControl: 0 }
         for (let i = 0; i < 240; i++) sim.step(FIXED_DT, DRIVE, params)
         expect(impacts).toBeGreaterThan(0)
         world.destroy()
+    })
+})
+
+describe('Live movement knobs (Known #6 — MOVEMENT + enemy exposed as params)', () => {
+    it('caps the player at a custom moveTopSpeed instead of the tuning default', async () => {
+        const world = await bootWorld()
+        const sim = makeSim(world)
+        const FWD: SimInput = { ...NO_INPUT, w: true }
+        // A low custom cap, well under the tuning default (20).
+        const CAP = 8
+        const params: SimParams = { ...VEL_PARAMS, moveTopSpeed: CAP, moveAccel: 60 }
+
+        for (let i = 0; i < 45; i++) sim.step(FIXED_DT, FWD, params) // spin up (~0.75s)
+
+        const vel = world.getLinearVelocity(sim.playerBodyPtr)
+        const speed = Math.hypot(vel.x, vel.z)
+        expect(speed).toBeGreaterThan(CAP - 2)               // reached the custom cap
+        expect(speed).toBeLessThan(CAP + 2)                  // and does NOT run up to the default
+        expect(speed).toBeLessThan(MOVEMENT.topSpeed - 5)    // clearly below the tuning default
+        world.destroy()
+    })
+
+    it('a higher enemyVelUnit gives a higher chase top speed than a lower one', async () => {
+        const s = useGameStore.getState()
+        // Spawn far enough (35u, inside 40u vision) that the enemy stays in chase and
+        // accelerating without reaching the player — so its peak speed reflects velUnit
+        // directly (chase top speed = enemySpeed · 1.5 · velUnit) and never saturates at contact.
+        const maxChaseSpeed = async (velUnit: number): Promise<number> => {
+            const world = await bootWorld()
+            const sim = new MarbleSim(world, {
+                enemySize: s.enemySize,
+                enemyMass: s.enemyMass,
+                playerSpawn: { x: 0, y: 1.0, z: 0 },
+                enemySpawn: { x: 0, y: 0.5 + s.enemySize, z: -35 } // within vision, stays far
+            })
+            const params: SimParams = {
+                enemySpeed: s.enemySpeed, enemyAirControl: 0,
+                enemyVelUnit: velUnit
+            }
+            let peak = 0
+            for (let i = 0; i < 100; i++) { // ~1.67s: ~0.5s alert ramp, then chase
+                sim.step(FIXED_DT, NO_INPUT, params)
+                const v = world.getLinearVelocity(sim.enemyBodyPtr)
+                peak = Math.max(peak, Math.hypot(v.x, v.z))
+            }
+            world.destroy()
+            return peak
+        }
+        const fast = await maxChaseSpeed(12) // target ≈ 2·1.5·12 = 36 u/s
+        const slow = await maxChaseSpeed(4)  // target ≈ 2·1.5·4  = 12 u/s
+        expect(fast).toBeGreaterThan(slow + 5) // clearly faster chase with a higher reach
     })
 })

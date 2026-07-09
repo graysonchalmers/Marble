@@ -11,11 +11,16 @@ export function UnifiedDebugMenu() {
     const audioDebugMode = useGameStore(s => s.audioDebugMode)
     const setAudioDebugMode = (val: { closingEnabled: boolean, openingEnabled: boolean }) => useGameStore.setState({ audioDebugMode: val })
     const physicsPreset = useGameStore(s => s.physicsPreset)
-    const movementModel = useGameStore(s => s.movementModel)
-    const enemyMovementModel = useGameStore(s => s.enemyMovementModel)
     const playerDrift = useGameStore(s => s.playerDrift)
     const downhillRoll = useGameStore(s => s.downhillRoll)
     const jumpHeight = useGameStore(s => s.jumpHeight)
+    const enemySpeed = useGameStore(s => s.enemySpeed)
+    const moveTopSpeed = useGameStore(s => s.moveTopSpeed)
+    const moveAccel = useGameStore(s => s.moveAccel)
+    const moveBrakeDecel = useGameStore(s => s.moveBrakeDecel)
+    const moveAirControl = useGameStore(s => s.moveAirControl)
+    const enemyVelUnit = useGameStore(s => s.enemyVelUnit)
+    const enemyVelAccel = useGameStore(s => s.enemyVelAccel)
     const playfeelPreset = useGameStore(s => s.playfeelPreset)
     const applyPlayfeelPreset = useGameStore(s => s.applyPlayfeelPreset)
     const setSetting = useGameStore(s => s.setSetting)
@@ -221,66 +226,13 @@ export function UnifiedDebugMenu() {
                                     cursor: 'pointer'
                                 }}
                             >
-                                <option value="current">Current (baseline)</option>
-                                <option value="frictionOnly">A · Friction only</option>
-                                <option value="v1Gravity">B · v1 gravity</option>
-                                <option value="blend">C · Blend</option>
+                                <option value="current">Light · low gravity</option>
+                                <option value="v1Gravity">Heavy · v1 gravity</option>
+                                <option value="blend">Blend · default</option>
                             </select>
                         </div>
                         <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
-                            Changing rebuilds the arena (resets the round). Gravity + jump affect both models; friction only bites the torque model.
-                        </div>
-                    </div>
-
-                    <div className="debug-divider" />
-
-                    {/* Section: Movement Model (Known #4 fix — live A/B, no rebuild) */}
-                    <div style={{ marginBottom: '12px' }}>
-                        <div className="debug-section-title">
-                            Movement Model
-                        </div>
-                        <div className="debug-row" style={{ alignItems: 'center' }}>
-                            <span>Model</span>
-                            <select
-                                value={movementModel}
-                                onChange={(e) => setSetting('movementModel', e.target.value as typeof movementModel)}
-                                style={{
-                                    background: 'rgba(255,255,255,0.08)',
-                                    border: '1px solid #444',
-                                    color: '#fff',
-                                    borderRadius: '4px',
-                                    padding: '2px 6px',
-                                    fontSize: '11px',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                <option value="velocity">Velocity (1:1 roll)</option>
-                                <option value="torque">Torque (legacy)</option>
-                            </select>
-                        </div>
-                        <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
-                            Live toggle (no rebuild). Velocity = drive the ball directly, spin follows motion. Torque = old wheel-spin model.
-                        </div>
-
-                        {/* Enemy movement model — mirrors the player's velocity drive */}
-                        <div className="debug-row" style={{ alignItems: 'center', marginTop: '8px' }}>
-                            <span>Enemy</span>
-                            <select
-                                value={enemyMovementModel}
-                                onChange={(e) => setSetting('enemyMovementModel', e.target.value as typeof enemyMovementModel)}
-                                style={{
-                                    background: 'rgba(255,255,255,0.08)',
-                                    border: '1px solid #444',
-                                    color: '#fff',
-                                    borderRadius: '4px',
-                                    padding: '2px 6px',
-                                    fontSize: '11px',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                <option value="velocity">Velocity (same as player)</option>
-                                <option value="force">Force (legacy)</option>
-                            </select>
+                            Changing rebuilds the arena (resets the round). Gravity + jump are the live levers under the velocity model; the friction fields are now largely vestigial (velocity control overrides grounded traction).
                         </div>
                     </div>
 
@@ -327,6 +279,98 @@ export function UnifiedDebugMenu() {
 
                         <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
                             Drift = glide/inertia on release. Downhill Roll = how hard gravity pulls the ball down slopes when idle. Jump Height = apex in units (~1.8 clears the enemy ball).
+                        </div>
+                    </div>
+
+                    <div className="debug-divider" />
+
+                    {/* Section: Movement Tuning (velocity drive — all live, no rebuild) */}
+                    <div style={{ marginBottom: '12px' }}>
+                        <div className="debug-section-title">
+                            Movement Tuning
+                        </div>
+
+                        {/* Player top speed */}
+                        <div className="debug-row" style={{ alignItems: 'center' }}>
+                            <span>Top Speed</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{moveTopSpeed.toFixed(0)} u/s</span>
+                        </div>
+                        <input
+                            type="range" min={5} max={40} step={1} value={moveTopSpeed}
+                            onChange={(e) => setSetting('moveTopSpeed', parseFloat(e.target.value))}
+                            style={{ width: '100%' }}
+                        />
+
+                        {/* Player accel */}
+                        <div className="debug-row" style={{ alignItems: 'center', marginTop: '6px' }}>
+                            <span>Accel</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{moveAccel.toFixed(0)}</span>
+                        </div>
+                        <input
+                            type="range" min={10} max={150} step={5} value={moveAccel}
+                            onChange={(e) => setSetting('moveAccel', parseFloat(e.target.value))}
+                            style={{ width: '100%' }}
+                        />
+
+                        {/* Player brake decel */}
+                        <div className="debug-row" style={{ alignItems: 'center', marginTop: '6px' }}>
+                            <span>Brake Decel</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{moveBrakeDecel.toFixed(0)}</span>
+                        </div>
+                        <input
+                            type="range" min={10} max={200} step={5} value={moveBrakeDecel}
+                            onChange={(e) => setSetting('moveBrakeDecel', parseFloat(e.target.value))}
+                            style={{ width: '100%' }}
+                        />
+
+                        {/* Player air control */}
+                        <div className="debug-row" style={{ alignItems: 'center', marginTop: '6px' }}>
+                            <span>Air Control</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{moveAirControl.toFixed(2)}</span>
+                        </div>
+                        <input
+                            type="range" min={0} max={1} step={0.05} value={moveAirControl}
+                            onChange={(e) => setSetting('moveAirControl', parseFloat(e.target.value))}
+                            style={{ width: '100%' }}
+                        />
+
+                        <div style={{ height: '1px', background: '#333', margin: '10px 0' }} />
+
+                        {/* Enemy speed multiplier (difficulty) */}
+                        <div className="debug-row" style={{ alignItems: 'center' }}>
+                            <span>Enemy Speed</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{enemySpeed.toFixed(1)}×</span>
+                        </div>
+                        <input
+                            type="range" min={0.5} max={5} step={0.1} value={enemySpeed}
+                            onChange={(e) => setSetting('enemySpeed', parseFloat(e.target.value))}
+                            style={{ width: '100%' }}
+                        />
+
+                        {/* Enemy reach speed (velUnit) */}
+                        <div className="debug-row" style={{ alignItems: 'center', marginTop: '6px' }}>
+                            <span>Enemy Reach</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{enemyVelUnit.toFixed(1)}</span>
+                        </div>
+                        <input
+                            type="range" min={2} max={14} step={0.5} value={enemyVelUnit}
+                            onChange={(e) => setSetting('enemyVelUnit', parseFloat(e.target.value))}
+                            style={{ width: '100%' }}
+                        />
+
+                        {/* Enemy accel */}
+                        <div className="debug-row" style={{ alignItems: 'center', marginTop: '6px' }}>
+                            <span>Enemy Accel</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{enemyVelAccel.toFixed(0)}</span>
+                        </div>
+                        <input
+                            type="range" min={10} max={100} step={5} value={enemyVelAccel}
+                            onChange={(e) => setSetting('enemyVelAccel', parseFloat(e.target.value))}
+                            style={{ width: '100%' }}
+                        />
+
+                        <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
+                            Player: Top Speed / Accel (snappiness) / Brake Decel / midair Air Control. Enemy chase top speed = Enemy Speed × Reach. All live, no rebuild.
                         </div>
                     </div>
 

@@ -29,7 +29,7 @@ export const createSettingsSlice: StateCreator<
 
         // If a settings key is changed (other than activePreset itself), mark preset as custom.
         // The Box3D-beta feel knobs are independent dev selectors — changing them must NOT trip activePreset.
-        const BOX3D_FEEL_KEYS = ["physicsPreset", "movementModel", "enemyMovementModel", "playerDrift", "downhillRoll", "jumpHeight"];
+        const BOX3D_FEEL_KEYS = ["physicsPreset", "playerDrift", "downhillRoll", "jumpHeight", "moveTopSpeed", "moveAccel", "moveBrakeDecel", "moveAirControl", "enemyVelUnit", "enemyVelAccel"];
         if (key !== "activePreset" && !BOX3D_FEEL_KEYS.includes(key as string) && key in DEFAULT_SETTINGS) {
           nextState.activePreset = "custom";
         }

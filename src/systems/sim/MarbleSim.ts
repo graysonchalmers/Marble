@@ -30,9 +30,9 @@ import {
 } from '../ai/EnemyAI'
 import {
     TERRAIN, PLAYER, ENEMY, RULES, OBSTACLES, PHYSICS_PRESETS, DEFAULT_PHYSICS_PRESET,
-    MOVEMENT, DEFAULT_MOVEMENT_MODEL, DEFAULT_ENEMY_MOVEMENT_MODEL, DEFAULT_DRIFT, DEFAULT_DOWNHILL_ROLL, FX
+    MOVEMENT, DEFAULT_DRIFT, DEFAULT_DOWNHILL_ROLL, FX
 } from './tuning'
-import type { PhysicsFeel, MovementModel, EnemyMovementModel } from './tuning'
+import type { PhysicsFeel } from './tuning'
 import { getTerrainHeight } from '../../utils/terrain'
 import { mulberry32, DEFAULT_SIM_SEED } from './rng'
 
@@ -49,16 +49,20 @@ export interface SimInput {
 export interface SimParams {
     enemySpeed: number
     enemyAirControl: number
-    /** Player movement model — live-switchable per step (no rebuild). Defaults to DEFAULT_MOVEMENT_MODEL. */
-    movementModel?: MovementModel
-    /** Enemy movement model — velocity (default) mirrors the player, or legacy force. */
-    enemyMovementModel?: EnemyMovementModel
     /** Coast glide/inertia on release, 0 (snappy stop) .. 1 (long glide). Default DEFAULT_DRIFT. */
     playerDrift?: number
     /** Downhill roll strength when coasting on a slope, 0 (off) .. 1 (full gravity). Default DEFAULT_DOWNHILL_ROLL. */
     downhillRoll?: number
     /** Target jump apex height (u). Impulse derived from height + gravity + mass. Default PLAYER.jumpHeight. */
     jumpHeight?: number
+    /** Player velocity-model knobs (live). Omit → tuning.ts MOVEMENT.* defaults (keeps callers/tests byte-identical). */
+    moveTopSpeed?: number
+    moveAccel?: number
+    moveBrakeDecel?: number
+    moveAirControl?: number
+    /** Enemy velocity-drive knobs (live). Omit → tuning.ts ENEMY.velUnit / velAccel defaults. */
+    enemyVelUnit?: number
+    enemyVelAccel?: number
     /**
      * Countdown early-release: when true, the player is fully live but the enemy is
      * pinned at its spawn (no AI, no movement, no tagging) so the player can take a
@@ -303,55 +307,13 @@ export class MarbleSim {
     }
 
     /**
-     * Legacy torque-driven control: input applies spin, ground friction converts
-     * spin→translation. Kept behind the movement-model toggle for A/B comparison.
-     */
-    private applyTorqueControl(w: Box3DWorld, input: SimInput, isGrounded: boolean, playerVel: Vec3Like, dt: number): void {
-        let tx = (input.w ? -PLAYER.torque : 0) + (input.s ? PLAYER.torque : 0)
-        let tz = (input.a ? PLAYER.torque : 0) + (input.d ? -PLAYER.torque : 0)
-        if (!isGrounded) {
-            tx *= PLAYER.airControl
-            tz *= PLAYER.airControl
-        }
-
-        const angVel = w.getAngularVelocity(this.playerBodyPtr)
-        if (tx !== 0 && angVel.x !== 0 && Math.sign(tx) !== Math.sign(angVel.x)) {
-            tx *= PLAYER.directionChangeBoost
-        }
-        if (tz !== 0 && angVel.z !== 0 && Math.sign(tz) !== Math.sign(angVel.z)) {
-            tz *= PLAYER.directionChangeBoost
-        }
-        w.applyTorque(this.playerBodyPtr, tx, 0, tz)
-
-        if (isGrounded) {
-            if (input.shift) {
-                w.applyTorque(this.playerBodyPtr, -angVel.x * PLAYER.brakeTorqueFactor, 0, -angVel.z * PLAYER.brakeTorqueFactor)
-                if (Math.sqrt(playerVel.x * playerVel.x + playerVel.z * playerVel.z) > 0.1) {
-                    w.applyLinearImpulseToCenter(this.playerBodyPtr, -playerVel.x * PLAYER.brakeImpulseFactor, 0, -playerVel.z * PLAYER.brakeImpulseFactor)
-                }
-            } else if (tx === 0 && tz === 0) {
-                w.applyTorque(this.playerBodyPtr, -angVel.x * PLAYER.idleSpinDamping, 0, -angVel.z * PLAYER.idleSpinDamping)
-            }
-        }
-
-        // Soft top-speed cap.
-        const speed = Math.sqrt(playerVel.x * playerVel.x + playerVel.z * playerVel.z)
-        if (speed > PLAYER.topSpeed) {
-            const excess = speed - PLAYER.topSpeed
-            const nextSpeed = PLAYER.topSpeed + excess * Math.exp(-PLAYER.topSpeedDecayRate * dt)
-            const decay = nextSpeed / speed
-            w.setLinearVelocity(this.playerBodyPtr, playerVel.x * decay, playerVel.y, playerVel.z * decay)
-        }
-    }
-
-    /**
      * Velocity-driven control (Known issue #4 fix): input drives horizontal
      * velocity DIRECTLY toward a target (accelerate with authority, cap at top
      * speed), and the ball's spin is slaved to its motion so it rolls 1:1 with
      * no wheel-spin. Rolling-without-slip about the up normal gives
      * ω = (v_z / r, 0, -v_x / r). Vertical velocity (gravity/jump) is left to
      * physics; airborne hands back to physics apart from a light steering nudge.
-     * Input mapping matches the torque model: forward = -Z, right = +X.
+     * Input mapping: forward = -Z, right = +X.
      */
     private applyVelocityControl(
         w: Box3DWorld,
@@ -372,10 +334,16 @@ export class MarbleSim {
             dirZ /= len
         }
 
+        // Live-tunable movement knobs (fall back to the tuning.ts constants when omitted).
+        const topSpeed = params.moveTopSpeed ?? MOVEMENT.topSpeed
+        const accel = params.moveAccel ?? MOVEMENT.accel
+        const brakeDecel = params.moveBrakeDecel ?? MOVEMENT.brakeDecel
+        const airCtl = params.moveAirControl ?? MOVEMENT.airControl
+
         if (!isGrounded) {
             // Airborne: physics owns motion; allow only a light steering nudge.
             if (hasInput) {
-                const nudge = MOVEMENT.accel * MOVEMENT.airControl * dt
+                const nudge = accel * airCtl * dt
                 w.setLinearVelocity(this.playerBodyPtr, playerVel.x + dirX * nudge, playerVel.y, playerVel.z + dirZ * nudge)
             }
             return
@@ -427,9 +395,9 @@ export class MarbleSim {
             }
         } else {
             // --- Driving or braking: approach the target velocity with authority ---
-            const targetVx = (!braking && hasInput) ? dirX * MOVEMENT.topSpeed : 0
-            const targetVz = (!braking && hasInput) ? dirZ * MOVEMENT.topSpeed : 0
-            const rate = braking ? MOVEMENT.brakeDecel : MOVEMENT.accel
+            const targetVx = (!braking && hasInput) ? dirX * topSpeed : 0
+            const targetVz = (!braking && hasInput) ? dirZ * topSpeed : 0
+            const rate = braking ? brakeDecel : accel
             const maxDelta = rate * dt
             const dvx = targetVx - vx
             const dvz = targetVz - vz
@@ -466,7 +434,9 @@ export class MarbleSim {
         params: SimParams,
         dt: number
     ): void {
-        const targetSpeed = params.enemySpeed * getSpeedMultiplier(this.currentAIState) * ENEMY.velUnit
+        const velUnit = params.enemyVelUnit ?? ENEMY.velUnit
+        const velAccel = params.enemyVelAccel ?? ENEMY.velAccel
+        const targetSpeed = params.enemySpeed * getSpeedMultiplier(this.currentAIState) * velUnit
 
         let dx = headingX + this.avoidanceForce.x
         let dz = headingZ + this.avoidanceForce.z
@@ -475,7 +445,7 @@ export class MarbleSim {
 
         if (!isGrounded) {
             if (params.enemyAirControl > 0 && targetSpeed > 0) {
-                const nudge = ENEMY.velAccel * params.enemyAirControl * dt
+                const nudge = velAccel * params.enemyAirControl * dt
                 w.setLinearVelocity(this.enemyBodyPtr, enemyVel.x + dx * nudge, enemyVel.y, enemyVel.z + dz * nudge)
             }
             return
@@ -483,7 +453,7 @@ export class MarbleSim {
 
         const targetVx = dx * targetSpeed
         const targetVz = dz * targetSpeed
-        const maxDelta = ENEMY.velAccel * dt
+        const maxDelta = velAccel * dt
         let vx = enemyVel.x
         let vz = enemyVel.z
         const dvx = targetVx - vx
@@ -547,14 +517,9 @@ export class MarbleSim {
         }
         this.playerGrounded = isGrounded
 
-        const model = params.movementModel ?? DEFAULT_MOVEMENT_MODEL
-        if (model === 'velocity') {
-            this.applyVelocityControl(w, input, isGrounded, playerVel, dt, params, playerTrans.position.x, playerTrans.position.z)
-        } else {
-            this.applyTorqueControl(w, input, isGrounded, playerVel, dt)
-        }
+        this.applyVelocityControl(w, input, isGrounded, playerVel, dt, params, playerTrans.position.x, playerTrans.position.z)
 
-        // Jump (shared across models; sim-time cooldown; was wall-clock setTimeout).
+        // Jump (sim-time cooldown; was wall-clock setTimeout).
         // Set vertical velocity directly from a target apex HEIGHT: v = sqrt(2·|g|·h).
         // Mass-free and exact, so jump height holds across gravity presets. Nerfed default
         // clears the enemy ball (~1.8u) but never summits the tall cubes.
@@ -649,37 +614,16 @@ export class MarbleSim {
 
         this.enemyGrounded = freezeEnemy ? false : isEnemyGrounded
 
-        const enemyModel = params.enemyMovementModel ?? DEFAULT_ENEMY_MOVEMENT_MODEL
         if (freezeEnemy) {
             // Countdown early-release: lock the enemy at spawn (no chase yet) so the
-            // player can take a head start. Overrides any residual velocity/force so it
+            // player can take a head start. Overrides any residual velocity so it
             // stays put right up until the countdown timer ends and normal play begins.
             w.bodySetTransform(this.enemyBodyPtr, this.enemySpawn.x, this.enemySpawn.y, this.enemySpawn.z, 0, 0, 0, 1)
             w.setLinearVelocity(this.enemyBodyPtr, 0, 0, 0)
             w.setAngularVelocity(this.enemyBodyPtr, 0, 0, 0)
             this.enemyVel.set(0, 0, 0)
-        } else if (enemyModel === 'velocity') {
-            this.applyEnemyVelocityControl(w, headingX, headingZ, isEnemyGrounded, enemyVel, params, dt)
         } else {
-            // Legacy force steering + misalignment braking.
-            const enemyControl = isEnemyGrounded ? 1.0 : params.enemyAirControl
-            let fx = headingX + this.avoidanceForce.x
-            let fz = headingZ + this.avoidanceForce.z
-
-            const enemyVelLen = Math.sqrt(enemyVel.x * enemyVel.x + enemyVel.z * enemyVel.z)
-            if (enemyVelLen > ENEMY.minSpeedForBraking) {
-                const velDirX = enemyVel.x / enemyVelLen
-                const velDirZ = enemyVel.z / enemyVelLen
-                const alignment = velDirX * headingX + velDirZ * headingZ
-                if (alignment < ENEMY.brakeAlignmentThreshold) {
-                    const brakingStrength = (1 - alignment) * enemyVelLen * ENEMY.brakeStrengthFactor
-                    fx -= velDirX * brakingStrength
-                    fz -= velDirZ * brakingStrength
-                }
-            }
-
-            const forceStrength = params.enemySpeed * getSpeedMultiplier(this.currentAIState) * ENEMY.forceFactor * enemyControl
-            w.applyForceToCenter(this.enemyBodyPtr, fx * forceStrength, 0, fz * forceStrength)
+            this.applyEnemyVelocityControl(w, headingX, headingZ, isEnemyGrounded, enemyVel, params, dt)
         }
 
         // --- Tag detection (edge-triggered; skipped while the enemy is frozen) ---
