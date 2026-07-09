@@ -161,6 +161,9 @@ export function SettingsMenu() {
         worldScale, setWorldScale,
         cubeCount, setCubeCount,
         cubeScale, setCubeScale,
+        columnCount, setColumnCount,
+        columnSize, setColumnSize,
+        columnHeight, setColumnHeight,
         soundEnabled, setSoundEnabled,
         physicsRate, setPhysicsRate,
         shadowsEnabled, setShadowsEnabled,
@@ -283,6 +286,10 @@ export function SettingsMenu() {
                         <p style={{ fontSize: '10px', color: '#666', marginBottom: '8px' }}>Requires Restart</p>
                         <Slider label="Box Count" value={cubeCount} onChange={setCubeCount} min={0} max={100} step={1} color={COLORS.muted} />
                         <Slider label="Box Size" value={cubeScale} onChange={setCubeScale} min={0.5} max={10} step={0.5} color={COLORS.muted} />
+                        <div style={{ height: '10px' }} />
+                        <Slider label="Column Count" value={columnCount} onChange={setColumnCount} min={0} max={40} step={1} color={COLORS.muted} />
+                        <Slider label="Column Size" value={columnSize} onChange={setColumnSize} min={0.5} max={8} step={0.5} color={COLORS.muted} />
+                        <Slider label="Column Height" value={columnHeight} onChange={setColumnHeight} min={2} max={30} step={1} color={COLORS.muted} />
                     </CollapsibleSection>
 
                     <CollapsibleSection

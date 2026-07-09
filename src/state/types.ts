@@ -27,6 +27,9 @@ export interface SettingsState {
   // Level
   cubeCount: number;
   cubeScale: number;
+  columnCount: number;
+  columnSize: number;
+  columnHeight: number;
 
   // Perf / Graphics
   soundEnabled: boolean;

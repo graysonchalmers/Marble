@@ -17,6 +17,11 @@ export const DEFAULT_SETTINGS: SettingsState = {
   worldScale: 0.75,
   cubeCount: 30,
   cubeScale: 7,
+  // Tall pillars (Obst-2): fewer, thinner, and taller than cubes — weave-and-dodge cover
+  // the player can't jump over (default jump clears ~1.8u). Live in SettingsMenu → Environment.
+  columnCount: 6,
+  columnSize: 3,
+  columnHeight: 12,
   soundEnabled: true,
   physicsRate: 60, // Changed default to 60 for Medium preset
   shadowsEnabled: true,

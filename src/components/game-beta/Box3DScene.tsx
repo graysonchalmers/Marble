@@ -132,6 +132,7 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
     const sphereRef = useRef<THREE.Mesh>(null)
     const enemyRef = useRef<THREE.Mesh>(null)
     const cubesRef = useRef<THREE.InstancedMesh>(null)
+    const columnsRef = useRef<THREE.InstancedMesh>(null)
 
     // Store settings/state
     const enemySize = useGameStore(s => s.enemySize)
@@ -278,6 +279,18 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
         if (!mesh || sim.cubePositions.length === 0) return
         const matrix = new THREE.Matrix4()
         sim.cubePositions.forEach((pos, i) => {
+            matrix.setPosition(pos)
+            mesh.setMatrixAt(i, matrix)
+        })
+        mesh.instanceMatrix.needsUpdate = true
+    }, [sim])
+
+    // Columns are static too — set their instance matrices once per sim construction.
+    useEffect(() => {
+        const mesh = columnsRef.current
+        if (!mesh || sim.columnPositions.length === 0) return
+        const matrix = new THREE.Matrix4()
+        sim.columnPositions.forEach((pos, i) => {
             matrix.setPosition(pos)
             mesh.setMatrixAt(i, matrix)
         })
@@ -448,6 +461,22 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
                 </instancedMesh>
             )}
 
+            {/* Column Obstacles (tall static pillars, positions set once from sim.columnPositions).
+                Physics-authoritative dims from the sim — NOT the live store values. Note: columns
+                are intentionally NOT camera-occluded (unlike cubes) — occlusion.ts assumes a uniform
+                cube AABB; a tall pillar needs non-uniform extents (backlog). */}
+            {sim.columnPositions.length > 0 && (
+                <instancedMesh
+                    ref={columnsRef}
+                    args={[undefined, undefined, sim.columnPositions.length]}
+                    castShadow
+                    receiveShadow
+                >
+                    <boxGeometry args={[sim.columnSize, sim.columnHeight, sim.columnSize]} />
+                    <meshStandardMaterial map={cubeTexture} color="#b8b0c8" />
+                </instancedMesh>
+            )}
+
             {/* Player Sphere Visual Mesh */}
             <mesh ref={sphereRef} castShadow>
                 <sphereGeometry args={[0.5, 32, 16]} />
@@ -576,10 +605,10 @@ export function Box3DScene() {
                 obstacles: {
                     cubeCount: storeState.cubeCount,
                     cubeScale: storeState.cubeScale,
-                    // Column fields land in Gate 2 (docs/STATUS.md); zeroed until then.
-                    columnCount: 0,
-                    columnSize: 0,
-                    columnHeight: 0
+                    // Tall pillars (Obst-2) — live-tunable in SettingsMenu → Environment (apply on restart).
+                    columnCount: storeState.columnCount,
+                    columnSize: storeState.columnSize,
+                    columnHeight: storeState.columnHeight
                 },
                 events: {
                     onTag: () => {

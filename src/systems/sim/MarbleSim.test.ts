@@ -126,6 +126,21 @@ describe('MarbleSim static obstacle scatter', () => {
         }
     })
 
+    it('exposes physics-authoritative cube/column dims for the renderer (anti-drift)', () => {
+        const { world } = makeWorld()
+        const sim = new MarbleSim(world, {
+            enemySize: 0.9,
+            enemyMass: 2.5,
+            obstacles: { cubeCount: 3, cubeScale: 7, columnCount: 3, columnSize: 3, columnHeight: 12 }
+        })
+
+        // Render must read these off the sim (built at construction), never the live store,
+        // so the visual mesh can't drift from the static colliders.
+        expect(sim.cubeScale).toBe(7)
+        expect(sim.columnSize).toBe(3)
+        expect(sim.columnHeight).toBe(12)
+    })
+
     it('produces identical layouts for identical seeds, different layouts for different seeds (F9)', () => {
         const obstacles = { cubeCount: 12, cubeScale: 7, columnCount: 4, columnSize: 2, columnHeight: 14 }
         const build = (seed: number) =>

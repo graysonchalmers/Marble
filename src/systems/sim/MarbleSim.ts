@@ -134,6 +134,10 @@ export class MarbleSim {
     readonly seed: number
     /** Physics-authoritative cube edge length (render must use this, not live store values). */
     readonly cubeScale: number
+    /** Physics-authoritative column footprint (X/Z edge) — render must use this, not live store values. */
+    readonly columnSize: number
+    /** Physics-authoritative column height (Y) — render must use this, not live store values. */
+    readonly columnHeight: number
     /** Resolved physics feel (friction + jump). Gravity is applied by the scene at world creation. */
     readonly physics: PhysicsFeel
     /** True when a real heightfield was supplied — enables downhill roll (flat test slabs stay flat). */
@@ -193,6 +197,8 @@ export class MarbleSim {
         this.seed = config.seed ?? DEFAULT_SIM_SEED
         this.rand = mulberry32(this.seed)
         this.cubeScale = config.obstacles?.cubeScale ?? 0
+        this.columnSize = config.obstacles?.columnSize ?? 0
+        this.columnHeight = config.obstacles?.columnHeight ?? 0
         this.physics = config.physics ?? PHYSICS_PRESETS[DEFAULT_PHYSICS_PRESET]
         this.hasTerrain = !!config.heights
         this.events = config.events ?? {}
