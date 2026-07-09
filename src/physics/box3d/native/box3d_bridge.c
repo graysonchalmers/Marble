@@ -264,6 +264,10 @@ void marble_box3d_body_destroy(uintptr_t bodyPtr)
     {
         return;
     }
+    if (b3Body_IsValid(body->bodyId))
+    {
+        b3DestroyBody(body->bodyId);
+    }
     free(body);
 }
 
