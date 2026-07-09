@@ -1,5 +1,6 @@
 import React from 'react'
 import { useGameStore } from '../../store/useGameStore'
+import { computeYourPlacing, type PlacingRow } from './records'
 
 interface MenuOverlayProps {
     title?: string
@@ -108,7 +109,16 @@ export const StartScreen: React.FC<{ onStart: () => void }> = ({ onStart }) => {
     )
 }
 
-const renderRecordsTable = (records: Array<{ date: string, timeAlive: number }>, currentScore?: number) => {
+const CURRENT_RUN_ROW_STYLE = {
+    background: 'rgba(229, 57, 53, 0.15)',
+    borderLeft: '3px solid #ffcc00',
+} as const;
+
+const renderRecordsTable = (
+    records: Array<{ date: string, timeAlive: number }>,
+    currentScore?: number,
+    placing?: PlacingRow | null,
+) => {
     if (!records || records.length === 0) return null;
 
     return (
@@ -124,14 +134,11 @@ const renderRecordsTable = (records: Array<{ date: string, timeAlive: number }>,
                 {records.map((r, i) => {
                     const isCurrentRun = currentScore !== undefined && Math.abs(r.timeAlive - currentScore) < 0.001;
                     return (
-                        <tr 
-                            key={i} 
-                            style={isCurrentRun ? { 
-                                background: 'rgba(229, 57, 53, 0.15)', 
-                                borderLeft: '3px solid #ffcc00' 
-                            } : undefined}
+                        <tr
+                            key={i}
+                            style={isCurrentRun ? CURRENT_RUN_ROW_STYLE : undefined}
                         >
-                            <td style={{ 
+                            <td style={{
                                 color: isCurrentRun ? '#ffcc00' : (i === 0 ? '#ffcc00' : 'rgba(255,255,255,0.4)'),
                                 fontWeight: isCurrentRun ? 'bold' : 'normal'
                             }}>
@@ -142,6 +149,24 @@ const renderRecordsTable = (records: Array<{ date: string, timeAlive: number }>,
                         </tr>
                     );
                 })}
+                {placing && (
+                    <React.Fragment>
+                        {/* Separator: signals the gap between the visible top runs and your placing below. */}
+                        <tr aria-hidden="true">
+                            <td colSpan={3} style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: '0.85rem', letterSpacing: '3px', padding: '2px 0' }}>
+                                ⋯
+                            </td>
+                        </tr>
+                        {/* Your run, highlighted, with its real place — even when it's below the top 5. */}
+                        <tr style={CURRENT_RUN_ROW_STYLE}>
+                            <td style={{ color: '#ffcc00', fontWeight: 'bold' }}>
+                                {placing.rankLabel} (You)
+                            </td>
+                            <td style={{ fontWeight: 'bold' }}>{placing.record.date}</td>
+                            <td style={{ fontWeight: 'bold', color: '#ffcc00' }}>{placing.record.timeAlive.toFixed(2)}s</td>
+                        </tr>
+                    </React.Fragment>
+                )}
             </tbody>
         </table>
     );
@@ -187,8 +212,14 @@ export const GameOverScreen: React.FC<{ score: number, onRestart: () => void }> 
     const isNewRecord = useGameStore(s => s.isNewRecord)
     const personalRecords = useGameStore(s => s.personalRecords)
 
-    // Find the rank (1-indexed) in the full top records list
+    // Find the rank (1-indexed) in the full top records list (0 = beyond the stored top 10)
     const currentRank = personalRecords.findIndex(r => Math.abs(r.timeAlive - score) < 0.001) + 1;
+
+    // The visible leaderboard is the top 5. If this run ranks below that, build a
+    // highlighted "your placing" row to append at the bottom so you can see where
+    // you landed relative to the top runs (even when you're not in them).
+    const VISIBLE = 5;
+    const placing = computeYourPlacing(personalRecords, score, VISIBLE, new Date().toLocaleDateString());
 
     return (
         <MenuOverlay
@@ -232,7 +263,7 @@ export const GameOverScreen: React.FC<{ score: number, onRestart: () => void }> 
                     <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', alignSelf: 'flex-start', paddingLeft: '12px' }}>
                         Top Runs
                     </div>
-                    {renderRecordsTable(personalRecords.slice(0, 5), score)}
+                    {renderRecordsTable(personalRecords.slice(0, VISIBLE), score, placing)}
                 </div>
             )}
         </MenuOverlay>
