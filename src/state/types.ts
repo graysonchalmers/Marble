@@ -30,6 +30,9 @@ export interface SettingsState {
   columnCount: number;
   columnSize: number;
   columnHeight: number;
+  // Physics playground (Phase P)
+  propCount: number;        // scattered dynamic knock-around props (0 = off) — Feature A
+  terrainRoughness: number; // variable-floor bump amplitude (0 = flat) — Feature B
 
   // Perf / Graphics
   soundEnabled: boolean;

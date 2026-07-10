@@ -10,7 +10,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { Box3DWorld } from '../../physics/box3d/Box3DWorld'
 import type { MarbleBox3DBridgeExports } from '../../physics/box3d/box3dBridge'
 import { MarbleSim } from './MarbleSim'
-import { OBSTACLES } from './tuning'
+import { OBSTACLES, PROPS } from './tuning'
 import { getTerrainHeight } from '../../utils/terrain'
 
 function makeBridge(): MarbleBox3DBridgeExports {
@@ -164,6 +164,81 @@ describe('MarbleSim static obstacle scatter', () => {
         expect(
             a.cubePositions[0].x !== c.cubePositions[0].x ||
             a.cubePositions[0].z !== c.cubePositions[0].z
+        ).toBe(true)
+    })
+})
+
+describe('MarbleSim scattered props (Phase P, Feature A)', () => {
+    const baseObstacles = { cubeCount: 0, cubeScale: 7, columnCount: 0, columnSize: 3, columnHeight: 12 }
+
+    it('spawns no props when propCount is omitted (backward compatible)', () => {
+        const { world, bridge } = makeWorld()
+        const sim = new MarbleSim(world, { enemySize: 0.9, enemyMass: 2.5 })
+        expect(sim.propCount).toBe(0)
+        expect(sim.propRadii).toHaveLength(0)
+        expect(sim.propSpawns).toHaveLength(0)
+        // Only the player + enemy dynamic spheres — no props.
+        expect(bridge.createDynamicSphere).toHaveBeenCalledTimes(2)
+    })
+
+    it('spawns propCount dynamic spheres (player + enemy + props), all outside the clear radius', () => {
+        const { world, bridge } = makeWorld()
+        const propCount = 14
+        const sim = new MarbleSim(world, {
+            enemySize: 0.9,
+            enemyMass: 2.5,
+            obstacles: { ...baseObstacles, propCount },
+        })
+
+        expect(sim.propCount).toBe(propCount)
+        expect(sim.propRadii).toHaveLength(propCount)
+        expect(sim.propSpawns).toHaveLength(propCount)
+        expect(sim.propPrev).toHaveLength(propCount)
+        expect(sim.propCurr).toHaveLength(propCount)
+
+        // player(1) + enemy(1) + propCount dynamic spheres.
+        expect(bridge.createDynamicSphere).toHaveBeenCalledTimes(2 + propCount)
+
+        const clearSq = OBSTACLES.clearRadius * OBSTACLES.clearRadius
+        for (const s of sim.propSpawns) {
+            expect(s.x * s.x + s.z * s.z).toBeGreaterThanOrEqual(clearSq)
+        }
+        for (const r of sim.propRadii) {
+            expect(r).toBeGreaterThanOrEqual(PROPS.minRadius)
+            expect(r).toBeLessThanOrEqual(PROPS.maxRadius)
+        }
+    })
+
+    it('drops each prop above the terrain (spawn y = terrainHeight + radius + dropHeight)', () => {
+        const { world } = makeWorld()
+        const sim = new MarbleSim(world, {
+            enemySize: 0.9,
+            enemyMass: 2.5,
+            obstacles: { ...baseObstacles, propCount: 8 },
+        })
+        sim.propSpawns.forEach((s, i) => {
+            expect(s.y).toBeCloseTo(getTerrainHeight(s.x, s.z) + sim.propRadii[i] + PROPS.dropHeight, 5)
+        })
+    })
+
+    it('is seed-deterministic: same seed → identical props, different seed → different (F9)', () => {
+        const obstacles = { ...baseObstacles, propCount: 12 }
+        const build = (seed: number) =>
+            new MarbleSim(makeWorld().world, { enemySize: 0.9, enemyMass: 2.5, seed, obstacles })
+
+        const a = build(42)
+        const b = build(42)
+        const c = build(1337)
+
+        a.propSpawns.forEach((s, i) => {
+            expect(s.x).toBe(b.propSpawns[i].x)
+            expect(s.z).toBe(b.propSpawns[i].z)
+            expect(a.propRadii[i]).toBe(b.propRadii[i])
+        })
+        expect(
+            a.propSpawns[0].x !== c.propSpawns[0].x ||
+            a.propSpawns[0].z !== c.propSpawns[0].z ||
+            a.propRadii[0] !== c.propRadii[0]
         ).toBe(true)
     })
 })

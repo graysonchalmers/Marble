@@ -13,6 +13,9 @@ import { loadBox3DBridge, loadBox3DBridgeModule } from './box3dBridge'
 import { useGameStore } from '../../store/useGameStore'
 import { MarbleSim, type SimInput } from '../../systems/sim/MarbleSim'
 import { FIXED_DT } from '../../systems/sim/tuning'
+import { ReplayRecorder } from '../../systems/replay/recorder'
+import { ReplayPlayer } from '../../systems/replay/player'
+import { REPLAY_VERSION } from '../../systems/replay/types'
 // @ts-expect-error - compiled JS module doesn't have TS declarations
 import createMarbleBox3DBridgeModule from '../../../public/box3d/box3d_bridge.js'
 
@@ -155,6 +158,87 @@ describe('Box3D Headless Physical Integration (Feel Invariants, real MarbleSim)'
         }
         // Sanity: the run actually moved things (not comparing frozen zeros)
         expect(Math.abs(a[2]) + Math.abs(a[5])).toBeGreaterThan(0.01)
+    })
+
+    it('Replay: recording a scripted run and replaying it reproduces a bit-identical trajectory', async () => {
+        // Varied scripted input so the recorder captures changing frames, not a constant.
+        const script = (i: number): SimInput => ({
+            w: i < 140,
+            a: i >= 60 && i < 90,
+            s: false,
+            d: i >= 90 && i < 140,
+            space: i === 150,
+            shift: i >= 240,
+        })
+        const settings = useGameStore.getState()
+        const params = { enemySpeed: settings.enemySpeed, enemyAirControl: settings.enemyAirControl }
+        const steps = 300
+        const seed = 0xbeef
+
+        function makeSeededSim(world: Box3DWorld): MarbleSim {
+            return new MarbleSim(world, {
+                enemySize: settings.enemySize,
+                enemyMass: settings.enemyMass,
+                playerSpawn: { x: 0, y: 1.0, z: 0 },
+                enemySpawn: { x: 0, y: 0.5 + settings.enemySize, z: -20 },
+                seed,
+            })
+        }
+
+        // --- LIVE run: drive the sim with the script AND record every tick ---
+        const world1 = await bootWorld()
+        const sim1 = makeSeededSim(world1)
+        const rec = new ReplayRecorder()
+        rec.start({
+            version: REPLAY_VERSION,
+            seed,
+            fixedDt: FIXED_DT,
+            enemySize: settings.enemySize,
+            enemyMass: settings.enemyMass,
+            playerSpawn: { x: 0, y: 1.0, z: 0 },
+            enemySpawn: { x: 0, y: 0.5 + settings.enemySize, z: -20 },
+            gravityY: -9.81,
+        })
+        for (let i = 0; i < steps; i++) {
+            const input = script(i)
+            rec.capture(input, params)
+            sim1.step(FIXED_DT, input, params)
+        }
+        const live = [
+            sim1.playerCurr.position.x, sim1.playerCurr.position.y, sim1.playerCurr.position.z,
+            sim1.enemyCurr.position.x, sim1.enemyCurr.position.y, sim1.enemyCurr.position.z,
+        ]
+        const replay = rec.stop()
+        world1.destroy()
+
+        expect(replay).not.toBeNull()
+        expect(replay!.frames.length).toBe(steps)
+        expect(replay!.header.seed).toBe(seed)
+
+        // --- REPLAY run: rebuild a fresh sim from the header, feed the recorded stream ---
+        const world2 = await bootWorld()
+        const sim2 = new MarbleSim(world2, {
+            enemySize: replay!.header.enemySize,
+            enemyMass: replay!.header.enemyMass,
+            playerSpawn: replay!.header.playerSpawn,
+            enemySpawn: replay!.header.enemySpawn,
+            seed: replay!.header.seed,
+        })
+        const playerCursor = new ReplayPlayer(replay!)
+        let frame
+        while ((frame = playerCursor.next()) !== null) {
+            sim2.step(replay!.header.fixedDt, frame.input, frame.params)
+        }
+        const played = [
+            sim2.playerCurr.position.x, sim2.playerCurr.position.y, sim2.playerCurr.position.z,
+            sim2.enemyCurr.position.x, sim2.enemyCurr.position.y, sim2.enemyCurr.position.z,
+        ]
+        world2.destroy()
+
+        // Bit-identical: the replay reproduced the exact match.
+        expect(playerCursor.done).toBe(true)
+        expect(played).toEqual(live)
+        expect(Math.abs(live[2]) + Math.abs(live[5])).toBeGreaterThan(0.01) // actually moved
     })
 
     it('resetPositions restores spawn state and clears the tag flag', async () => {

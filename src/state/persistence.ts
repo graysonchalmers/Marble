@@ -1,8 +1,8 @@
 import type { SettingsState } from "./types";
-import { MOVEMENT, ENEMY } from "../systems/sim/tuning";
+import { MOVEMENT, ENEMY, DEFAULT_TERRAIN_ROUGHNESS } from "../systems/sim/tuning";
 
 const STORAGE_KEY = "MARBLE_GAME_SETTINGS_V2";
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 export const DEFAULT_SETTINGS: SettingsState = {
   jumpForce: 5,
@@ -22,6 +22,10 @@ export const DEFAULT_SETTINGS: SettingsState = {
   columnCount: 6,
   columnSize: 3,
   columnHeight: 12,
+  // Phase P — scattered dynamic props (knock-around clutter) + variable-floor roughness.
+  // Both ON at a modest default so the physics shows off; dial to 0 to disable.
+  propCount: 12,
+  terrainRoughness: DEFAULT_TERRAIN_ROUGHNESS,
   soundEnabled: true,
   physicsRate: 60, // Changed default to 60 for Medium preset
   shadowsEnabled: true,
