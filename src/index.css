@@ -1,3 +1,20 @@
+/* ──────────────────────────────────────────────────────────
+   UI LAYER SYSTEM (single source of truth for stacking order).
+   Every fixed/absolute overlay pulls its z-index from here so the stack is
+   coherent and can't silently invert. Order (back → front):
+     scene (0) → passive HUD → side panels → MAIN MENU → modal → tooltip
+   The MAIN MENU (start / pause / game-over) sits ABOVE the dev + settings
+   panels so it's never covered; its container is click-through (pointer-
+   events:none) so the panels underneath stay fully usable while a menu shows.
+   ───────────────────────────────────────────────────────── */
+:root {
+  --z-hud: 10;       /* passive readouts: velocity, timer, countdown (no input) */
+  --z-panel: 400;    /* side panels: DEV TOOLS, Settings, title/minimap, version */
+  --z-menu: 800;     /* main menu: START / PAUSE / GAME OVER — above the panels  */
+  --z-modal: 2000;   /* changelog modal */
+  --z-tooltip: 3000; /* tooltips — always on top */
+}
+
 html,
 body,
 #root {
@@ -173,7 +190,7 @@ canvas {
   position: absolute;
   top: 24px;
   left: 24px;
-  z-index: 200;
+  z-index: var(--z-panel);
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -257,7 +274,7 @@ canvas {
   position: absolute;
   top: 20px;
   right: 20px;
-  z-index: 1000;
+  z-index: var(--z-panel);
   font-family: 'Inter', sans-serif;
   display: flex;
   flex-direction: column;
@@ -443,7 +460,7 @@ canvas {
   border-radius: 4px;
   width: 150px;
   color: #fff;
-  z-index: 1000;
+  z-index: var(--z-tooltip);
   pointer-events: none;
   text-align: center;
   box-shadow: 0 4px 12px rgba(0,0,0,0.5);
@@ -525,7 +542,7 @@ canvas {
      of the screen over the title with no scrollbar.) */
   top: 20px;
   left: 20px;
-  z-index: 1000;
+  z-index: var(--z-panel);
   font-family: 'JetBrains Mono', 'Consolas', monospace;
   display: flex;
   flex-direction: column;
@@ -562,7 +579,7 @@ canvas {
   color: #ccc;
   font-size: 11px;
   /* Bounded height so the panel never runs off-screen; scroll the overflow. Top-anchored
-     wrapper (toggle ≈36px + 8px gap + 20px top) → leave ~120px so there's clear breathing
+     wrapper (toggle ≈ 36px + 8px gap + 20px top) → leave ~120px so there's clear breathing
      room above and below and it never blankets the play area / title. */
   max-height: calc(100vh - 120px);
   overflow-y: auto;
@@ -618,7 +635,11 @@ canvas {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  z-index: 100;
+  z-index: var(--z-menu);
+  /* Click-through container: this full-screen overlay must NOT eat clicks meant
+     for the side panels beneath it now that it sits above them. Only interactive
+     children (.menu-btn) opt back in via pointer-events:auto. */
+  pointer-events: none;
   font-family: 'Inter', sans-serif;
 }
 
@@ -784,7 +805,7 @@ canvas {
   position: absolute;
   bottom: 20px;
   right: 20px;
-  z-index: 1000;
+  z-index: var(--z-panel);
   background: rgba(15, 15, 20, 0.8);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
@@ -812,7 +833,7 @@ canvas {
   background: rgba(0, 0, 0, 0.7);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  z-index: 2000;
+  z-index: var(--z-modal);
   display: flex;
   justify-content: center;
   align-items: center;
