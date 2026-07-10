@@ -59,3 +59,58 @@ export function computeYourPlacing(
         beyondTracked: true,
     }
 }
+
+export interface PlacingWindowRow {
+    record: RecordEntry
+    /** Display label for the rank cell, e.g. "#7" or "#101+". */
+    rankLabel: string
+    /** True for the current run's own row (highlighted). */
+    isYou: boolean
+    /** True when this row is the current run and it fell outside the stored list. */
+    beyondTracked?: boolean
+}
+
+/**
+ * Build the "zoom to your rank" window shown beneath the visible top-`visibleCount`
+ * on the game-over screen (now that we track up to 100 runs, a single row wasn't enough
+ * context). Returns a short window of neighbours centred on the player's place — `radius`
+ * rows on each side — so you can see who's just ahead and just behind you.
+ *
+ * Returns:
+ *  - `null` when the current run is already inside the visible top-`visibleCount`
+ *    (highlighted in place — no zoom row needed), or when there are no records.
+ *  - a single beyond-tracked row (`#N+`) when the run is worse than everything stored.
+ *  - otherwise the neighbour window, clamped so it never overlaps the visible slice
+ *    (start ≥ `visibleCount`) and never runs past the end of the stored list.
+ */
+export function computePlacingWindow(
+    records: RecordEntry[],
+    score: number,
+    visibleCount: number,
+    todayLabel: string,
+    radius = 1,
+    eps = 0.001
+): PlacingWindowRow[] | null {
+    if (!records || records.length === 0) return null
+
+    const idx = records.findIndex(r => Math.abs(r.timeAlive - score) < eps)
+    if (idx >= 0 && idx < visibleCount) return null // already shown in the top slice
+
+    if (idx < 0) {
+        // Beyond the stored list: time known, exact place isn't.
+        return [{
+            record: { date: todayLabel, timeAlive: score },
+            rankLabel: `#${records.length + 1}+`,
+            isYou: true,
+            beyondTracked: true,
+        }]
+    }
+
+    const start = Math.max(visibleCount, idx - radius)
+    const end = Math.min(records.length - 1, idx + radius)
+    const rows: PlacingWindowRow[] = []
+    for (let i = start; i <= end; i++) {
+        rows.push({ record: records[i], rankLabel: `#${i + 1}`, isYou: i === idx })
+    }
+    return rows
+}

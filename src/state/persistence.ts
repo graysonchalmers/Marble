@@ -2,7 +2,7 @@ import type { SettingsState } from "./types";
 import { MOVEMENT, ENEMY } from "../systems/sim/tuning";
 
 const STORAGE_KEY = "MARBLE_GAME_SETTINGS_V2";
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export const DEFAULT_SETTINGS: SettingsState = {
   jumpForce: 5,
@@ -28,8 +28,10 @@ export const DEFAULT_SETTINGS: SettingsState = {
   pixelRatio: 1,
   maxParticles: 50,
   graphicsPreset: "medium",
-  cameraStiffness: 3,
-  cameraOffset: 15,
+  // Camera feel — these now drive the Box3D follow-camera live (were hardcoded 6/11 in the
+  // scene). Defaults re-anchored to that shipped feel so wiring the sliders is feel-neutral.
+  cameraStiffness: 6,
+  cameraOffset: 11,
   useV2AI: true,
   playerAirControl: 0.1,
   enemyAirControl: 0,
@@ -42,13 +44,17 @@ export const DEFAULT_SETTINGS: SettingsState = {
     visuals: true,
     audio: true,
   },
-  groundGridSize: 176,
-  groundColorBg: "#70b348",
-  groundColorGrid: "#3e6b1f",
+  // Ground look — matches the Box3D scene's previously-hardcoded terrain texture
+  // (#1a4d2e bg / #4f772d grid at 64px), so the now-live Visuals→Ground sliders are
+  // look-neutral at default. (Old Cannon-era values were #70b348 / #3e6b1f / 176.)
+  groundGridSize: 64,
+  groundColorBg: "#1a4d2e",
+  groundColorGrid: "#4f772d",
   cubeGridSize: 256,
   cubeColorBg: "#d3d3d3",
   cubeColorGrid: "#404040",
   uiAccentColor: "#E53935",
+  occlusionMode: "ghost",
 
   masterVolume: 0.5,
   audioPitchEnabled: true,
@@ -105,6 +111,16 @@ function migrate(saved: any): SettingsState {
     if (version < 3) {
       saved.personalBest = saved.personalBest ?? 0;
       saved.personalRecords = saved.personalRecords ?? [];
+    }
+    if (version < 4) {
+      // These settings used to be hardcoded/ignored in the Box3D path; they're now live.
+      // Reset stale Cannon-era persisted values to the shipped Box3D look/feel so wiring
+      // them up doesn't retroactively change anyone's camera or terrain. Fresh forward.
+      delete saved.cameraStiffness;
+      delete saved.cameraOffset;
+      delete saved.groundColorBg;
+      delete saved.groundColorGrid;
+      delete saved.groundGridSize;
     }
   }
   

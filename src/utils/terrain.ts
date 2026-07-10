@@ -22,3 +22,26 @@ export function getTerrainHeight(worldX: number, worldZ: number): number {
     // Hillier terrain formula from Level.tsx
     return Math.sin(xn * 1.5) * Math.cos(zn * 1.5) * 2.5 + Math.sin(xn * 4 + zn * 2) * 0.8
 }
+
+/**
+ * Analytic surface normal at a world (x, z), from the central-difference gradient of
+ * getTerrainHeight — the SAME source the sim's downhill-roll trusts (the WASM heightfield
+ * raycast returns a flat up-normal, so we can't use it). Returns a unit vector.
+ *
+ * For a height field y = h(x, z), the upward surface normal is
+ *   n = normalize(-∂h/∂x, 1, -∂h/∂z).
+ * `eps` is the sampling half-step (0.75u matches the downhill-roll probe).
+ */
+export function getTerrainNormal(
+    worldX: number,
+    worldZ: number,
+    eps = 0.75
+): { x: number; y: number; z: number } {
+    const dhdx = (getTerrainHeight(worldX + eps, worldZ) - getTerrainHeight(worldX - eps, worldZ)) / (2 * eps)
+    const dhdz = (getTerrainHeight(worldX, worldZ + eps) - getTerrainHeight(worldX, worldZ - eps)) / (2 * eps)
+    const nx = -dhdx
+    const ny = 1
+    const nz = -dhdz
+    const len = Math.hypot(nx, ny, nz)
+    return { x: nx / len, y: ny / len, z: nz / len }
+}

@@ -56,6 +56,11 @@ export interface SettingsState {
   cubeColorBg: string;
   cubeColorGrid: string;
   uiAccentColor: string;
+  // How obstacles between the camera and the player are revealed (see-through style):
+  //   ghost = 40% transparent textured (default) · wireframe = edges-only bounding box ·
+  //   xray = back-faces-only (shows the far interior wall, reads depth/collision) ·
+  //   silhouette = dark tinted see-through fill + bright edges · off = stays solid.
+  occlusionMode: "ghost" | "wireframe" | "xray" | "silhouette" | "off";
 
   // Audio settings
   masterVolume: number;

@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { useGameStore } from '../../store/useGameStore'
+import { PLAYFEEL_PRESETS } from '../../systems/sim/tuning'
 
 const COLORS = {
     primary: '#ffffff', // White (Clean)
@@ -73,6 +74,17 @@ function Toggle({ label, value, onChange }: any) {
     )
 }
 
+function Select({ label, value, onChange, options }: { label: string, value: string, onChange: (v: string) => void, options: { value: string, label: string }[] }) {
+    return (
+        <div style={{ marginBottom: '12px' }}>
+            <span className="select-label">{label}</span>
+            <select value={value} onChange={(e) => onChange(e.target.value)} className="select-input">
+                {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+        </div>
+    )
+}
+
 function ColorPicker({ label, value, onChange }: { label: string, value: string, onChange: (val: string) => void }) {
     return (
         <div className="color-picker-container">
@@ -113,7 +125,7 @@ function CollapsibleSection({ title, isOpen, onToggle, children }: { title: stri
 
 export function SettingsMenu() {
     const store = useGameStore()
-    
+
     const exportSettings = () => {
         const toExport = JSON.parse(localStorage.getItem('MARBLE_GAME_SETTINGS_V2') || '{}')
         const blob = new Blob([JSON.stringify(toExport, null, 2)], { type: 'application/json' })
@@ -138,6 +150,9 @@ export function SettingsMenu() {
         reader.readAsText(file)
     }
 
+    // Proxy: reading `setFoo` returns a setter that calls setSetting('foo', v); reading `foo`
+    // returns the live store value. Real store methods (setSettings, applyPlayfeelPreset,
+    // loadGraphicsPreset, setSectionState, setIsPaused) are passed straight through.
     const proxy = new Proxy(store, {
         get(target, prop: string) {
             if (prop.startsWith('set') && prop !== 'setSetting' && prop !== 'setSectionState' && prop !== 'setIsPaused' && prop !== 'setSettings') {
@@ -149,41 +164,46 @@ export function SettingsMenu() {
     })
 
     const {
-        jumpForce, setJumpForce,
-        moveSpeed, setMoveSpeed,
-        playerTopSpeed, setPlayerTopSpeed,
+        // Player movement (velocity model — all live, no rebuild)
+        moveTopSpeed, setMoveTopSpeed,
+        moveAccel, setMoveAccel,
+        moveBrakeDecel, setMoveBrakeDecel,
+        moveAirControl, setMoveAirControl,
+        jumpHeight, setJumpHeight,
+        playerDrift, setPlayerDrift,
+        downhillRoll, setDownhillRoll,
+        // Enemy (live drive + rebuild-baked size/weight)
         enemySpeed, setEnemySpeed,
+        enemyVelUnit, setEnemyVelUnit,
+        enemyVelAccel, setEnemyVelAccel,
+        enemyAirControl, setEnemyAirControl,
         enemySize, setEnemySize,
         enemyMass, setEnemyMass,
-        gravity, setGravity,
-        friction, setFriction,
-        restitution, setRestitution,
-        worldScale, setWorldScale,
+        // Physics feel (gravity lever) + one-click play-feel bundles
+        physicsPreset, setPhysicsPreset,
+        playfeelPreset, applyPlayfeelPreset,
+        // Environment (baked at construction — now rebuilds live)
         cubeCount, setCubeCount,
         cubeScale, setCubeScale,
         columnCount, setColumnCount,
         columnSize, setColumnSize,
         columnHeight, setColumnHeight,
-        soundEnabled, setSoundEnabled,
-        physicsRate, setPhysicsRate,
-        shadowsEnabled, setShadowsEnabled,
-        pixelRatio, setPixelRatio,
+        // Camera + graphics
         cameraStiffness, setCameraStiffness,
         cameraOffset, setCameraOffset,
-        setIsPaused,
-        useV2AI, setUseV2AI,
-        playerAirControl, setPlayerAirControl,
-        enemyAirControl, setEnemyAirControl,
-        controlsOpen, setControlsOpen,
-        sectionStates, setSectionState,
+        shadowsEnabled, setShadowsEnabled,
+        graphicsPreset, loadGraphicsPreset,
+        // Visuals
+        occlusionMode, setOcclusionMode,
         groundGridSize, setGroundGridSize,
         groundColorBg, setGroundColorBg,
         groundColorGrid, setGroundColorGrid,
         cubeGridSize, setCubeGridSize,
         cubeColorBg, setCubeColorBg,
         cubeColorGrid, setCubeColorGrid,
-
+        uiAccentColor, setUiAccentColor,
         // Audio
+        soundEnabled, setSoundEnabled,
         masterVolume, setMasterVolume,
         audioPitchEnabled, setAudioPitchEnabled,
         audioRateEnabled, setAudioRateEnabled,
@@ -199,10 +219,10 @@ export function SettingsMenu() {
         audioOpeningPitch, setAudioOpeningPitch,
         audioSolidDistance, setAudioSolidDistance,
         audioPitchModulation, setAudioPitchModulation,
-        uiAccentColor, setUiAccentColor,
-        activePreset, loadPreset,
-        graphicsPreset, loadGraphicsPreset,
-        maxParticles, setMaxParticles
+        // UI / shell
+        controlsOpen, setControlsOpen,
+        sectionStates, setSectionState,
+        setIsPaused,
     } = proxy as any
 
     const fileInputRef = useRef<HTMLInputElement>(null)
@@ -215,7 +235,6 @@ export function SettingsMenu() {
         const file = e.target.files?.[0]
         if (file) {
             importSettings(file)
-            // Reset input so same file can be selected again if needed
             e.target.value = ''
         }
     }
@@ -243,28 +262,36 @@ export function SettingsMenu() {
                         isOpen={sectionStates['gameplay']}
                         onToggle={() => setSectionState('gameplay', !sectionStates['gameplay'])}
                     >
-                        <div style={{ marginBottom: '12px' }}>
-                            <span className="select-label">Tuning Preset</span>
-                            <select 
-                                value={activePreset} 
-                                onChange={(e) => loadPreset(e.target.value as any)} 
-                                className="select-input"
-                            >
-                                <option value="v2">V2 Balanced (Default)</option>
-                                <option value="v1">V1 Original (Tuned)</option>
-                                <option value="custom">Custom (Modified)</option>
-                            </select>
-                        </div>
-                        <Slider label="Move Speed" value={moveSpeed} onChange={setMoveSpeed} min={1} max={30} step={0.5} color={COLORS.primary} />
-                        <Slider label="Top Speed" value={playerTopSpeed} onChange={setPlayerTopSpeed} min={5} max={100} step={1} color={COLORS.primary} />
-                        <Slider label="Jump Force" value={jumpForce} onChange={setJumpForce} min={1} max={30} step={0.5} color={COLORS.primary} />
-                        <Slider label="Player Air Control" value={playerAirControl} onChange={setPlayerAirControl} min={0} max={1} step={0.05} color={COLORS.primary} />
+                        <Select
+                            label="Play-Feel Preset"
+                            value={playfeelPreset}
+                            onChange={(v) => { if (v !== 'custom') applyPlayfeelPreset(v) }}
+                            options={[
+                                ...Object.entries(PLAYFEEL_PRESETS).map(([key, p]: any) => ({ value: key, label: p.label })),
+                                { value: 'custom', label: 'Custom (edited)' },
+                            ]}
+                        />
+                        <p style={{ fontSize: '10px', color: '#666', marginTop: '-4px', marginBottom: '10px' }}>
+                            One-click feel bundle (physics + drift + downhill + jump + enemy speed). Tweaking any knob below flips it to Custom.
+                        </p>
+
+                        <div className="section-subtitle">Player</div>
+                        <Slider label="Top Speed" value={moveTopSpeed} onChange={setMoveTopSpeed} min={5} max={40} step={1} color={COLORS.primary} tooltip="Horizontal top speed (u/s)." />
+                        <Slider label="Acceleration" value={moveAccel} onChange={setMoveAccel} min={10} max={150} step={5} color={COLORS.primary} tooltip="How snappily the ball reaches top speed / changes direction." />
+                        <Slider label="Brake Decel" value={moveBrakeDecel} onChange={setMoveBrakeDecel} min={10} max={200} step={5} color={COLORS.primary} tooltip="Deceleration while holding Shift (brake)." />
+                        <Slider label="Jump Height" value={jumpHeight} onChange={setJumpHeight} min={0.5} max={5} step={0.1} color={COLORS.primary} tooltip="Jump apex in units (~1.8 clears the enemy ball)." />
+                        <Slider label="Air Control" value={moveAirControl} onChange={setMoveAirControl} min={0} max={1} step={0.05} color={COLORS.primary} tooltip="Midair steering authority (fraction of accel)." />
+                        <Slider label="Drift / Glide" value={playerDrift} onChange={setPlayerDrift} min={0} max={1} step={0.05} color={COLORS.primary} tooltip="Coast/inertia on release: 0 = snappy stop, 1 = long floaty glide." />
+                        <Slider label="Downhill Roll" value={downhillRoll} onChange={setDownhillRoll} min={0} max={1} step={0.05} color={COLORS.primary} tooltip="How hard gravity pulls the idle ball down slopes." />
+
                         <div style={{ height: '10px' }} />
-                        <Toggle label="V2 Smart AI" value={useV2AI} onChange={setUseV2AI} />
-                        <Slider label="Enemy Speed" value={enemySpeed} onChange={setEnemySpeed} min={1} max={20} step={0.5} color={uiAccentColor} />
-                        <Slider label="Enemy Size" value={enemySize} onChange={setEnemySize} min={0.2} max={3.0} step={0.1} color={uiAccentColor} />
-                        <Slider label="Enemy Weight" value={enemyMass} onChange={setEnemyMass} min={0.1} max={10.0} step={0.1} color={uiAccentColor} />
+                        <div className="section-subtitle">Enemy</div>
+                        <Slider label="Enemy Speed" value={enemySpeed} onChange={setEnemySpeed} min={0.5} max={5} step={0.1} color={uiAccentColor} tooltip="Difficulty multiplier on the enemy's chase speed." />
+                        <Slider label="Enemy Reach" value={enemyVelUnit} onChange={setEnemyVelUnit} min={2} max={14} step={0.5} color={uiAccentColor} tooltip="Enemy top-speed unit — chase speed = Enemy Speed × Reach." />
+                        <Slider label="Enemy Accel" value={enemyVelAccel} onChange={setEnemyVelAccel} min={10} max={100} step={5} color={uiAccentColor} tooltip="How fast the enemy reaches its target velocity." />
                         <Slider label="Enemy Air Control" value={enemyAirControl} onChange={setEnemyAirControl} min={0} max={1} step={0.05} color={uiAccentColor} />
+                        <Slider label="Enemy Size" value={enemySize} onChange={setEnemySize} min={0.2} max={3.0} step={0.1} color={uiAccentColor} tooltip="Rebuilds the round when changed." />
+                        <Slider label="Enemy Weight" value={enemyMass} onChange={setEnemyMass} min={0.1} max={10.0} step={0.1} color={uiAccentColor} tooltip="Rebuilds the round when changed." />
                     </CollapsibleSection>
 
                     <CollapsibleSection
@@ -272,10 +299,19 @@ export function SettingsMenu() {
                         isOpen={sectionStates['physics']}
                         onToggle={() => setSectionState('physics', !sectionStates['physics'])}
                     >
-                        <Slider label="Gravity (Y)" value={gravity} onChange={setGravity} min={-40} max={-1} step={0.5} color={COLORS.muted} />
-                        <Slider label="Bounciness" value={restitution} onChange={setRestitution} min={0} max={1.5} step={0.1} color={COLORS.muted} />
-                        <Slider label="Friction" value={friction} onChange={setFriction} min={0} max={1} step={0.05} color={COLORS.muted} />
-                        <Slider label="World Scale" value={worldScale} onChange={setWorldScale} min={0.25} max={4} step={0.25} color={COLORS.primary} tooltip="Adjusts relative gravity/speed feel: <1 = Giant Mode, >1 = Toy Mode" />
+                        <Select
+                            label="Physics Feel (gravity)"
+                            value={physicsPreset}
+                            onChange={(v) => setPhysicsPreset(v)}
+                            options={[
+                                { value: 'current', label: 'Light · low gravity' },
+                                { value: 'v1Gravity', label: 'Heavy · v1 gravity' },
+                                { value: 'blend', label: 'Blend · default' },
+                            ]}
+                        />
+                        <p style={{ fontSize: '10px', color: '#666', marginTop: '-4px' }}>
+                            Gravity is the live lever under the velocity model (drives fall speed, jump rescale, downhill roll). Changing it rebuilds the arena (resets the round).
+                        </p>
                     </CollapsibleSection>
 
                     <CollapsibleSection
@@ -283,7 +319,7 @@ export function SettingsMenu() {
                         isOpen={sectionStates['environment']}
                         onToggle={() => setSectionState('environment', !sectionStates['environment'])}
                     >
-                        <p style={{ fontSize: '10px', color: '#666', marginBottom: '8px' }}>Requires Restart</p>
+                        <p style={{ fontSize: '10px', color: '#666', marginBottom: '8px' }}>Applies live — resets the round (layout stays put, only the changed dimension updates).</p>
                         <Slider label="Box Count" value={cubeCount} onChange={setCubeCount} min={0} max={100} step={1} color={COLORS.muted} />
                         <Slider label="Box Size" value={cubeScale} onChange={setCubeScale} min={0.5} max={10} step={0.5} color={COLORS.muted} />
                         <div style={{ height: '10px' }} />
@@ -325,7 +361,6 @@ export function SettingsMenu() {
                         <Slider label="Tone Vol (Solid)" value={audioToneVolume} onChange={setAudioToneVolume} min={0} max={1} step={0.1} color={COLORS.light} />
 
                         <div className="section-subtitle">Styles</div>
-
                         <div style={{ marginBottom: '8px' }}>
                             <span className="select-label">Ping Waveform</span>
                             <select value={audioPingStyle} onChange={(e) => setAudioPingStyle(e.target.value as any)} className="select-input">
@@ -335,7 +370,6 @@ export function SettingsMenu() {
                                 <option value="sawtooth">Sawtooth (Harsh)</option>
                             </select>
                         </div>
-
                         <div style={{ marginBottom: '8px' }}>
                             <span className="select-label">Tone Waveform</span>
                             <select value={audioToneStyle} onChange={(e) => setAudioToneStyle(e.target.value as any)} className="select-input">
@@ -352,20 +386,33 @@ export function SettingsMenu() {
                         isOpen={sectionStates['visuals']}
                         onToggle={() => setSectionState('visuals', !sectionStates['visuals'])}
                     >
+                        <Select
+                            label="See-Through Obstacles"
+                            value={occlusionMode}
+                            onChange={(v) => setOcclusionMode(v)}
+                            options={[
+                                { value: 'ghost', label: 'Ghost (transparent)' },
+                                { value: 'wireframe', label: 'Wireframe (edges only)' },
+                                { value: 'xray', label: 'X-Ray (back faces)' },
+                                { value: 'silhouette', label: 'Silhouette (tinted)' },
+                                { value: 'off', label: 'Off (stay solid)' },
+                            ]}
+                        />
+                        <p style={{ fontSize: '10px', color: '#666', marginTop: '-4px', marginBottom: '10px' }}>
+                            How obstacles between the camera and your ball are revealed so you're never hidden.
+                        </p>
+
                         <div className="section-subtitle">Ground</div>
                         <Slider label="Grid Size" value={groundGridSize} onChange={setGroundGridSize} min={16} max={256} step={16} color={COLORS.muted} />
-                        <ColorPicker label="Background" value={groundColorBg} onChange={setGroundColorBg} />
                         <ColorPicker label="Background" value={groundColorBg} onChange={setGroundColorBg} />
                         <ColorPicker label="Grid Lines" value={groundColorGrid} onChange={setGroundColorGrid} />
 
                         <div style={{ height: '12px' }} />
-
                         <div className="section-subtitle">Interface Theme</div>
                         <ColorPicker label="Accent Color" value={uiAccentColor} onChange={setUiAccentColor} />
 
                         <div style={{ height: '12px' }} />
-
-                        <div className="section-subtitle">Cubes</div>
+                        <div className="section-subtitle">Obstacles</div>
                         <Slider label="Grid Size" value={cubeGridSize} onChange={setCubeGridSize} min={64} max={512} step={32} color={COLORS.muted} />
                         <ColorPicker label="Background" value={cubeColorBg} onChange={setCubeColorBg} />
                         <ColorPicker label="Grid Lines" value={cubeColorGrid} onChange={setCubeColorGrid} />
@@ -376,46 +423,29 @@ export function SettingsMenu() {
                         isOpen={sectionStates['graphics']}
                         onToggle={() => setSectionState('graphics', !sectionStates['graphics'])}
                     >
-                        <Slider label="Cam Stiffness" value={cameraStiffness} onChange={setCameraStiffness} min={1} max={50} step={1} color={COLORS.light} />
-                        <Slider label="Cam Distance" value={cameraOffset} onChange={setCameraOffset} min={2} max={50} step={1} color={COLORS.light} />
+                        <Slider label="Cam Stiffness" value={cameraStiffness} onChange={setCameraStiffness} min={1} max={20} step={0.5} color={COLORS.light} tooltip="How tightly the camera tracks the ball." />
+                        <Slider label="Cam Distance" value={cameraOffset} onChange={setCameraOffset} min={5} max={30} step={1} color={COLORS.light} tooltip="Follow-camera distance/height." />
 
                         <div style={{ height: '10px' }} />
-                        <div className="section-subtitle">Render Pipeline</div>
-
-                        <div style={{ marginBottom: '12px' }}>
-                            <span className="select-label">Graphics Quality</span>
-                            <select 
-                                value={graphicsPreset} 
-                                onChange={(e) => loadGraphicsPreset(e.target.value as any)} 
-                                className="select-input"
-                            >
-                                <option value="low">Low (Fastest)</option>
-                                <option value="medium">Medium (Balanced)</option>
-                                <option value="high">High (High Quality)</option>
-                                <option value="ultra">Ultra (Maximum)</option>
-                                <option value="custom">Custom (Modified)</option>
-                            </select>
-                        </div>
-
+                        <div className="section-subtitle">Render</div>
+                        <Select
+                            label="Graphics Quality"
+                            value={graphicsPreset}
+                            onChange={(v) => loadGraphicsPreset(v)}
+                            options={[
+                                { value: 'low', label: 'Low (Fastest)' },
+                                { value: 'medium', label: 'Medium (Balanced)' },
+                                { value: 'high', label: 'High' },
+                                { value: 'ultra', label: 'Ultra (Maximum)' },
+                                { value: 'custom', label: 'Custom (Modified)' },
+                            ]}
+                        />
                         <Toggle label="Shadows" value={shadowsEnabled} onChange={setShadowsEnabled} />
-                        <Slider label="Resolution Scale" value={pixelRatio} onChange={setPixelRatio} min={0.25} max={2} step={0.25} color={COLORS.light} />
-                        <Slider label="Max Particles" value={maxParticles} onChange={setMaxParticles} min={0} max={500} step={10} color={COLORS.light} />
-                    </CollapsibleSection>
-
-                    <CollapsibleSection
-                        title="📊 Debug & Metrics"
-                        isOpen={sectionStates['debug'] !== false} // Default open if undefined? Or default from context
-                        onToggle={() => setSectionState('debug', !sectionStates['debug'])}
-                    >
-                        <Slider label="Physics Hz" value={physicsRate} onChange={setPhysicsRate} min={30} max={240} step={30} color="#888" />
                     </CollapsibleSection>
 
                     <div style={{ marginTop: '16px' }}>
                         <div className="export-import-container">
-                            <button
-                                onClick={handleImportClick}
-                                className="import-btn"
-                            >
+                            <button onClick={handleImportClick} className="import-btn">
                                 IMPORT JSON
                             </button>
                             <input
@@ -425,10 +455,7 @@ export function SettingsMenu() {
                                 onChange={handleFileChange}
                                 style={{ display: 'none' }}
                             />
-                            <button
-                                onClick={exportSettings}
-                                className="export-btn"
-                            >
+                            <button onClick={exportSettings} className="export-btn">
                                 EXPORT JSON
                             </button>
                         </div>

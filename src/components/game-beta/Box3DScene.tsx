@@ -141,6 +141,15 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
     const cubeGridSize = useGameStore(s => s.cubeGridSize)
     const cubeColorBg = useGameStore(s => s.cubeColorBg)
     const cubeColorGrid = useGameStore(s => s.cubeColorGrid)
+    // Ground look (Settings → Visuals) — previously hardcoded, now live.
+    const groundColorBg = useGameStore(s => s.groundColorBg)
+    const groundColorGrid = useGameStore(s => s.groundColorGrid)
+    const groundGridSize = useGameStore(s => s.groundGridSize)
+    // Camera feel (Settings → Camera & Graphics) — previously hardcoded 6/11, now live.
+    const cameraStiffness = useGameStore(s => s.cameraStiffness)
+    const cameraOffset = useGameStore(s => s.cameraOffset)
+    // See-through obstacle reveal style (Settings → Visuals).
+    const occlusionMode = useGameStore(s => s.occlusionMode)
 
     const [currentState, setCurrentState] = useState<EnemyState>('idle')
 
@@ -266,32 +275,38 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
         return geometry
     }, [heights])
 
-    const terrainTexture = useGridTexture('#1a4d2e', '#4f772d', 64)
+    const terrainTexture = useGridTexture(groundColorBg, groundColorGrid, groundGridSize)
     terrainTexture.repeat.set(WIDTH / 4, DEPTH / 4)
 
     // Cube obstacles: v1-matching grid texture, applied uniformly to every instance.
     const cubeTexture = useCubeGridTexture(cubeColorBg, cubeColorGrid, cubeGridSize)
 
     // Cubes are static (never move post-spawn) — set instance matrices once per
-    // sim construction rather than every frame.
+    // sim construction rather than every frame. Compose position + terrain-tilt
+    // orientation (sim.cubeQuaternions) so cubes sit flush along the slope.
     useEffect(() => {
         const mesh = cubesRef.current
         if (!mesh || sim.cubePositions.length === 0) return
         const matrix = new THREE.Matrix4()
+        const scaleOne = new THREE.Vector3(1, 1, 1)
+        const identQ = new THREE.Quaternion()
         sim.cubePositions.forEach((pos, i) => {
-            matrix.setPosition(pos)
+            matrix.compose(pos, sim.cubeQuaternions[i] ?? identQ, scaleOne)
             mesh.setMatrixAt(i, matrix)
         })
         mesh.instanceMatrix.needsUpdate = true
     }, [sim])
 
-    // Columns are static too — set their instance matrices once per sim construction.
+    // Columns are static too — set their instance matrices once per sim construction,
+    // tilted to the terrain normal like the cubes.
     useEffect(() => {
         const mesh = columnsRef.current
         if (!mesh || sim.columnPositions.length === 0) return
         const matrix = new THREE.Matrix4()
+        const scaleOne = new THREE.Vector3(1, 1, 1)
+        const identQ = new THREE.Quaternion()
         sim.columnPositions.forEach((pos, i) => {
-            matrix.setPosition(pos)
+            matrix.compose(pos, sim.columnQuaternions[i] ?? identQ, scaleOne)
             mesh.setMatrixAt(i, matrix)
         })
         mesh.instanceMatrix.needsUpdate = true
@@ -365,14 +380,12 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
             enemyRenderPosRef.current.copy(tempPos.current)
         }
 
-        // --- Camera follow (render-side smoothing) ---
+        // --- Camera follow (render-side smoothing) --- stiffness + distance are live store settings.
         const playerRenderPos = sphereRef.current ? sphereRef.current.position : sim.playerCurr.position
         const cameraDelta = Math.min(clampedDelta, 0.033)
-        const cameraStiffness = 6.0
         const smoothFactor = 1 - Math.exp(-cameraStiffness * cameraDelta)
         smoothedCamTarget.current.lerp(playerRenderPos, smoothFactor * 2)
 
-        const cameraOffset = 11
         tempOffset.current.set(0, cameraOffset * 0.5, cameraOffset)
         tempTargetCamPos.current.copy(smoothedCamTarget.current).add(tempOffset.current)
         state.camera.position.lerp(tempTargetCamPos.current, smoothFactor)
@@ -462,6 +475,10 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
             )}
 
             {/* Column Obstacles (tall static pillars, positions set once from sim.columnPositions).
+                Rendered as actual CYLINDERS (radius = columnSize/2, height = columnHeight) — the
+                physics collider stays a square-footprint box (the Box3D bridge has no cylinder
+                primitive; a true round collider needs a bridge primitive + WASM rebuild → backlog).
+                Cylinder is Y-up + center-origin like the box, so the same tilt matrices apply.
                 Physics-authoritative dims from the sim — NOT the live store values. Note: columns
                 are intentionally NOT camera-occluded (unlike cubes) — occlusion.ts assumes a uniform
                 cube AABB; a tall pillar needs non-uniform extents (backlog). */}
@@ -472,7 +489,7 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
                     castShadow
                     receiveShadow
                 >
-                    <boxGeometry args={[sim.columnSize, sim.columnHeight, sim.columnSize]} />
+                    <cylinderGeometry args={[sim.columnSize / 2, sim.columnSize / 2, sim.columnHeight, 20]} />
                     <meshStandardMaterial map={cubeTexture} color="#b8b0c8" />
                 </instancedMesh>
             )}
@@ -501,9 +518,11 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
                 <CubeOcclusion
                     cubesRef={cubesRef}
                     centers={sim.cubePositions}
+                    quaternions={sim.cubeQuaternions}
                     cubeScale={sim.cubeScale}
                     texture={cubeTexture}
                     playerPosRef={playerRenderPosRef}
+                    mode={occlusionMode}
                 />
             )}
 
@@ -534,6 +553,23 @@ export function Box3DScene() {
     // Physics feel preset (traction A/B). Reactive so changing it rebuilds the world+sim below.
     const physicsPreset = useGameStore(s => s.physicsPreset)
 
+    // Arena/enemy settings that are baked at sim construction. Reactive so changing them in
+    // Settings → Environment / Gameplay rebuilds the world+sim (Known #5 fix: previously these
+    // only ever applied at the first boot — restart didn't remount, so they looked "dead").
+    const cubeCount = useGameStore(s => s.cubeCount)
+    const cubeScale = useGameStore(s => s.cubeScale)
+    const columnCount = useGameStore(s => s.columnCount)
+    const columnSize = useGameStore(s => s.columnSize)
+    const columnHeight = useGameStore(s => s.columnHeight)
+    const enemySize = useGameStore(s => s.enemySize)
+    const enemyMass = useGameStore(s => s.enemyMass)
+
+    // Stable obstacle-scatter seed for this page session: rebuilds triggered by a settings
+    // change keep the SAME layout (only the changed dimension updates) instead of reshuffling
+    // every obstacle on each slider tick. Re-randomizes on a fresh page load.
+    const seedRef = useRef<number | null>(null)
+    if (seedRef.current === null) seedRef.current = Math.floor(Math.random() * 0x7fffffff)
+
     // Render-loop gating: while paused or on the game-over screen the sim is frozen, so
     // there's nothing new to draw. Switch R3F to on-demand rendering to stop the GPU
     // spinning a static frame ~60×/s; it renders one last frame then idles the rAF loop
@@ -541,6 +577,7 @@ export function Box3DScene() {
     const isPaused = useGameStore(s => s.isPaused)
     const gameState = useGameStore(s => s.gameState)
     const frozen = isPaused || gameState === 'gameover'
+    const shadowsEnabled = useGameStore(s => s.shadowsEnabled)
 
     // Input captured into a ref — zero React re-renders on keypress.
     const keys = useRef<SimInput>({ w: false, a: false, s: false, d: false, space: false, shift: false })
@@ -586,6 +623,10 @@ export function Box3DScene() {
             if (!active) return
 
             worldInstance = new Box3DWorld(bridge)
+            // A rapid settings change (e.g. dragging a slider) can supersede this boot
+            // after the world is created but before the cleanup captured it — destroy it
+            // here so quick rebuilds don't leak WASM worlds.
+            if (!active) { worldInstance.destroy(); worldInstance = null; return }
 
             const storeState = useGameStore.getState()
             // Resolve the selected physics feel preset. Gravity is applied to the world
@@ -599,9 +640,10 @@ export function Box3DScene() {
                 enemySize: storeState.enemySize,
                 enemyMass: storeState.enemyMass,
                 physics,
-                // Fresh seed per boot for layout variety; sim.seed records it so a
-                // future replay system can persist and reproduce this exact run (F9).
-                seed: Math.floor(Math.random() * 0x7fffffff),
+                // Stable per-session seed (seedRef) so a settings-driven rebuild keeps the
+                // same layout; sim.seed records it so a future replay system can reproduce
+                // this exact run (F9).
+                seed: seedRef.current ?? 0,
                 obstacles: {
                     cubeCount: storeState.cubeCount,
                     cubeScale: storeState.cubeScale,
@@ -646,7 +688,9 @@ export function Box3DScene() {
             active = false
             worldInstance?.destroy()
         }
-    }, [heights, physicsPreset])
+        // Arena/enemy settings are baked at construction, so a change to any of them
+        // rebuilds the world+sim (stable seed keeps the layout coherent across rebuilds).
+    }, [heights, physicsPreset, cubeCount, cubeScale, columnCount, columnSize, columnHeight, enemySize, enemyMass])
 
     if (status.error) {
         return (
@@ -662,7 +706,7 @@ export function Box3DScene() {
     }
 
     return (
-        <Canvas camera={{ position: [0, 8, 12], fov: 45 }} shadows frameloop={frozen ? 'demand' : 'always'}>
+        <Canvas camera={{ position: [0, 8, 12], fov: 45 }} shadows={shadowsEnabled} frameloop={frozen ? 'demand' : 'always'}>
             <Box3DPlayableScene sim={sim} keys={keys} heights={heights} />
         </Canvas>
     )

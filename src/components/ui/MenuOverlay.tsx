@@ -1,6 +1,6 @@
 import React from 'react'
 import { useGameStore } from '../../store/useGameStore'
-import { computeYourPlacing, type PlacingRow } from './records'
+import { computePlacingWindow, type PlacingWindowRow } from './records'
 
 interface MenuOverlayProps {
     title?: string
@@ -117,7 +117,7 @@ const CURRENT_RUN_ROW_STYLE = {
 const renderRecordsTable = (
     records: Array<{ date: string, timeAlive: number }>,
     currentScore?: number,
-    placing?: PlacingRow | null,
+    placingWindow?: PlacingWindowRow[] | null,
 ) => {
     if (!records || records.length === 0) return null;
 
@@ -149,22 +149,25 @@ const renderRecordsTable = (
                         </tr>
                     );
                 })}
-                {placing && (
+                {placingWindow && placingWindow.length > 0 && (
                     <React.Fragment>
-                        {/* Separator: signals the gap between the visible top runs and your placing below. */}
+                        {/* Separator: signals the gap between the visible top runs and the zoom-to-your-rank window below. */}
                         <tr aria-hidden="true">
                             <td colSpan={3} style={{ textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: '0.85rem', letterSpacing: '3px', padding: '2px 0' }}>
                                 ⋯
                             </td>
                         </tr>
-                        {/* Your run, highlighted, with its real place — even when it's below the top 5. */}
-                        <tr style={CURRENT_RUN_ROW_STYLE}>
-                            <td style={{ color: '#ffcc00', fontWeight: 'bold' }}>
-                                {placing.rankLabel} (You)
-                            </td>
-                            <td style={{ fontWeight: 'bold' }}>{placing.record.date}</td>
-                            <td style={{ fontWeight: 'bold', color: '#ffcc00' }}>{placing.record.timeAlive.toFixed(2)}s</td>
-                        </tr>
+                        {/* Zoom window: your run + its immediate neighbours, so you can see who's just
+                            ahead and behind — your own row highlighted, even when it's far below the top 5. */}
+                        {placingWindow.map((row, k) => (
+                            <tr key={`pw-${k}`} style={row.isYou ? CURRENT_RUN_ROW_STYLE : undefined}>
+                                <td style={{ color: row.isYou ? '#ffcc00' : 'rgba(255,255,255,0.4)', fontWeight: row.isYou ? 'bold' : 'normal' }}>
+                                    {row.rankLabel} {row.isYou && '(You)'}
+                                </td>
+                                <td style={{ fontWeight: row.isYou ? 'bold' : 'normal' }}>{row.record.date}</td>
+                                <td style={{ fontWeight: 'bold', color: row.isYou ? '#ffcc00' : 'white' }}>{row.record.timeAlive.toFixed(2)}s</td>
+                            </tr>
+                        ))}
                     </React.Fragment>
                 )}
             </tbody>
@@ -212,14 +215,15 @@ export const GameOverScreen: React.FC<{ score: number, onRestart: () => void }> 
     const isNewRecord = useGameStore(s => s.isNewRecord)
     const personalRecords = useGameStore(s => s.personalRecords)
 
-    // Find the rank (1-indexed) in the full top records list (0 = beyond the stored top 10)
+    // Find the rank (1-indexed) in the full top records list (0 = beyond the stored top 100)
     const currentRank = personalRecords.findIndex(r => Math.abs(r.timeAlive - score) < 0.001) + 1;
 
     // The visible leaderboard is the top 5. If this run ranks below that, build a
-    // highlighted "your placing" row to append at the bottom so you can see where
-    // you landed relative to the top runs (even when you're not in them).
+    // "zoom to your rank" window (your row + immediate neighbours) to append at the
+    // bottom so you can see where you landed relative to the top runs — now that we
+    // track up to 100 runs, the neighbours give useful context.
     const VISIBLE = 5;
-    const placing = computeYourPlacing(personalRecords, score, VISIBLE, new Date().toLocaleDateString());
+    const placingWindow = computePlacingWindow(personalRecords, score, VISIBLE, new Date().toLocaleDateString(), 1);
 
     return (
         <MenuOverlay
@@ -239,7 +243,7 @@ export const GameOverScreen: React.FC<{ score: number, onRestart: () => void }> 
                     </div>
                 ) : (
                     <div style={{ fontSize: '0.95rem', marginTop: '6px', color: 'rgba(255, 255, 255, 0.4)' }}>
-                        Rank: Unranked (Top 10)
+                        Rank: Unranked (Top 100)
                     </div>
                 )}
                 {isNewRecord && (
@@ -263,7 +267,7 @@ export const GameOverScreen: React.FC<{ score: number, onRestart: () => void }> 
                     <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.4)', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px', alignSelf: 'flex-start', paddingLeft: '12px' }}>
                         Top Runs
                     </div>
-                    {renderRecordsTable(personalRecords.slice(0, VISIBLE), score, placing)}
+                    {renderRecordsTable(personalRecords.slice(0, VISIBLE), score, placingWindow)}
                 </div>
             )}
         </MenuOverlay>

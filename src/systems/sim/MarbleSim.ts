@@ -33,8 +33,11 @@ import {
     MOVEMENT, DEFAULT_DRIFT, DEFAULT_DOWNHILL_ROLL, FX
 } from './tuning'
 import type { PhysicsFeel } from './tuning'
-import { getTerrainHeight } from '../../utils/terrain'
+import { getTerrainHeight, getTerrainNormal } from '../../utils/terrain'
 import { mulberry32, DEFAULT_SIM_SEED } from './rng'
+
+/** World up — obstacles tilt from this toward the local terrain normal. */
+const WORLD_UP = new THREE.Vector3(0, 1, 0)
 
 export interface SimInput {
     w: boolean
@@ -176,6 +179,17 @@ export class MarbleSim {
     readonly cubePositions: THREE.Vector3[] = []
     readonly columnPositions: THREE.Vector3[] = []
 
+    /**
+     * Per-obstacle orientation aligning the box's local +Y to the terrain normal, so
+     * obstacles sit tilted along the ground instead of all facing straight up. Render
+     * composes these into the instance matrices (physics-authoritative, anti-drift like
+     * cubeScale). Index-aligned with cubePositions / columnPositions. NOTE: the physics
+     * colliders stay axis-aligned (the bridge's createStaticBox takes no rotation) — this
+     * is a visual tilt; slopes here are gentle so the collider/visual mismatch is minor.
+     */
+    readonly cubeQuaternions: THREE.Quaternion[] = []
+    readonly columnQuaternions: THREE.Quaternion[] = []
+
     private readonly events: SimEvents
     private readonly playerSpawn: { x: number; y: number; z: number }
     private readonly enemySpawn: { x: number; y: number; z: number }
@@ -249,6 +263,7 @@ export class MarbleSim {
                 const y = getTerrainHeight(x, z) + half
                 world.createStaticBox(x, y, z, half, half, half, OBSTACLES.friction, OBSTACLES.restitution)
                 this.cubePositions.push(new THREE.Vector3(x, y, z))
+                this.cubeQuaternions.push(MarbleSim.orientToTerrain(x, z))
             }
         }
         if (obstacles && obstacles.columnCount > 0) {
@@ -258,6 +273,7 @@ export class MarbleSim {
                 const y = getTerrainHeight(x, z) + halfHeight
                 world.createStaticBox(x, y, z, halfSize, halfHeight, halfSize, OBSTACLES.friction, OBSTACLES.restitution)
                 this.columnPositions.push(new THREE.Vector3(x, y, z))
+                this.columnQuaternions.push(MarbleSim.orientToTerrain(x, z))
             }
         }
 
@@ -661,6 +677,19 @@ export class MarbleSim {
         w.step(dt)
 
         this.syncSnapshots(false)
+    }
+
+    /**
+     * Quaternion that tilts a box's local +Y onto the terrain normal at (x, z), so
+     * scattered obstacles sit flush along the slope instead of poking straight up.
+     * Pure + deterministic (analytic normal), so it needs no world/RNG state.
+     */
+    private static orientToTerrain(x: number, z: number): THREE.Quaternion {
+        const n = getTerrainNormal(x, z)
+        return new THREE.Quaternion().setFromUnitVectors(
+            WORLD_UP,
+            new THREE.Vector3(n.x, n.y, n.z)
+        )
     }
 
     /** Random (x, z) points kept outside OBSTACLES.clearRadius of the arena center. */

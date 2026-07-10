@@ -172,7 +172,7 @@ export const createSettingsSlice: StateCreator<
 
         const nextRecords = [...state.personalRecords, newRecord]
           .sort((a, b) => b.timeAlive - a.timeAlive)
-          .slice(0, 10);
+          .slice(0, 100);
 
         const nextState = {
           ...state,
