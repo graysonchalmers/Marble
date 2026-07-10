@@ -1,5 +1,6 @@
 import React from 'react'
 import { useGameStore } from '../../store/useGameStore'
+import { useReplayStore } from '../../state/replayStore'
 import { computePlacingWindow, type PlacingWindowRow } from './records'
 
 interface MenuOverlayProps {
@@ -90,6 +91,17 @@ export const MenuButton: React.FC<MenuButtonProps> = ({ children, variant = 'pri
         >
             {children}
         </button>
+    )
+}
+
+/** Game-over entry point into the replay of the run you just finished. */
+const WatchReplayButton: React.FC = () => {
+    const lastReplay = useReplayStore(s => s.lastReplay)
+    if (!lastReplay) return null
+    return (
+        <MenuButton onClick={() => useReplayStore.getState().startReplay()}>
+            ▶ Watch Replay
+        </MenuButton>
     )
 }
 
@@ -253,11 +265,12 @@ export const GameOverScreen: React.FC<{ score: number, onRestart: () => void }> 
                 )}
             </div>
 
-            <div style={{ margin: '20px 0' }}>
+            <div style={{ margin: '20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                 <MenuButton variant="danger" onClick={onRestart}>
                     Try Again
                 </MenuButton>
-                <div className="press-space-text" style={{ marginTop: '10px' }}>
+                <WatchReplayButton />
+                <div className="press-space-text" style={{ marginTop: '4px' }}>
                     Press Space
                 </div>
             </div>

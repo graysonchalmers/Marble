@@ -123,6 +123,37 @@ export const OBSTACLES = {
 } as const
 
 /* -------------------------------------------------------------------------- */
+/* Physics Playground (Phase P) — scattered props + variable-floor roughness   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Scattered knock-around props (Feature A) — the ONE dynamic primitive the Box3D bridge
+ * has is a sphere, so props are dynamic spheres. Visual is a faceted rubble chunk (varied
+ * size) so they read as debris you plow through, not a ball pit. They share the obstacle
+ * seeded scatter + clear radius, drop onto the terrain, and are knocked by the player/enemy.
+ */
+export const PROPS = {
+    density: 0.6,           // dynamic-sphere density (mass ∝ r³·density) — light so they scatter readily
+    friction: 0.5,
+    restitution: 0.35,      // slightly bouncy so knocks read
+    linearDamping: 0.2,
+    angularDamping: 0.35,
+    /** Per-prop collider radius range (seeded) — varied so it reads as rubble, not uniform balls. */
+    minRadius: 0.35,
+    maxRadius: 0.85,
+    /** Spawn height above the terrain surface so props fall in and settle. */
+    dropHeight: 1.5
+} as const
+
+/**
+ * Variable-floor roughness (Feature B) — default amplitude of the masked ground bumps
+ * (0 = flat). Bumps are ≥~2u wavelength so the 64×64 @2u heightfield collider actually
+ * resolves them; both player and enemy feel them. Live-tunable via the `terrainRoughness`
+ * store key (Settings → Environment). See utils/terrain.ts for the roughness field.
+ */
+export const DEFAULT_TERRAIN_ROUGHNESS = 0.6
+
+/* -------------------------------------------------------------------------- */
 /* Physics feel presets (traction A/B — STATUS.md Known issue #4 + Phase E)    */
 /* -------------------------------------------------------------------------- */
 
