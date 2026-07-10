@@ -25,3 +25,8 @@ dist-ssr
 
 # v2 worktree lives inside the repo folder
 /v2
+
+# Secrets — keep API keys out of git
+.env
+.env.local
+.env.*.local
