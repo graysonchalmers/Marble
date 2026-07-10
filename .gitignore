@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Secrets — keep keys out of git (added 2026-07-10 by Claude, authorized by Grayson)
+.env
+.env.local
+.env.*.local

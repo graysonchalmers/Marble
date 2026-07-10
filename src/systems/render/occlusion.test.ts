@@ -75,3 +75,31 @@ describe('findOccludingBoxes (columns)', () => {
         expect(occ).toEqual([0, 1])
     })
 })
+
+describe('findOccludingBoxes (maxPlayerDist — camera-lag corridor cap)', () => {
+    // Simulate a lagging chase camera far behind a fast ball: the sightline is long
+    // and passes through obstacles both near the ball and far back near the camera.
+    const cam = { x: 0, y: 0.5, z: 40 }  // camera trails ~40u behind, roughly ball-height
+    const player = { x: 0, y: 0.5, z: 0 }
+    const centers = [
+        { x: 0, y: 0, z: 4 },   // 0: right in front of the ball (~4u away)
+        { x: 0, y: 0, z: 30 },  // 1: far back, near the lagging camera (~30u from ball)
+    ]
+
+    it('with no cap (default Infinity), fades both the near AND the far-back obstacle', () => {
+        const occ = findOccludingBoxes(cam, player, centers, 1, 1, 1)
+        expect(occ.sort()).toEqual([0, 1])
+    })
+
+    it('with maxPlayerDist=16, fades only the obstacle near the ball — not the far corridor', () => {
+        const occ = findOccludingBoxes(cam, player, centers, 1, 1, 1, 8, 0.6, 16)
+        expect(occ).toEqual([0])
+    })
+
+    it('ignores vertical distance (a tall pillar beside the ball still counts)', () => {
+        // Pillar center is 6u above the ball but only 3u away horizontally.
+        const tallCenters = [{ x: 0, y: 6, z: 3 }]
+        const occ = findOccludingBoxes(cam, player, tallCenters, 1.5, 6, 1.5, 8, 0.6, 16)
+        expect(occ).toEqual([0])
+    })
+})

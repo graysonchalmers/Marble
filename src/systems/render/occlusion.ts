@@ -92,7 +92,8 @@ export function findOccludingBoxes(
     centers: Vec3ish[],
     hx: number, hy: number, hz: number,
     maxCount = 8,
-    endPad = 0.6
+    endPad = 0.6,
+    maxPlayerDist = Infinity
 ): number[] {
     const dx = player.x - cam.x, dy = player.y - cam.y, dz = player.z - cam.z
     const len = Math.hypot(dx, dy, dz)
@@ -102,10 +103,23 @@ export function findOccludingBoxes(
     const p1y = cam.y + dy * shrink
     const p1z = cam.z + dz * shrink
 
+    // Only fade obstacles within `maxPlayerDist` (horizontal, xz) of the player. When
+    // the chase camera lags behind a fast ball the cam→player segment stretches across
+    // the whole arena and would fade every obstacle along that long corridor ("all the
+    // shapes vanish when I start moving"). At a normal follow distance the whole segment
+    // is well inside this radius, so behavior is unchanged; the cap only trims the far,
+    // near-camera end that appears when the camera trails. Vertical is ignored so a tall
+    // pillar the ball is beside (center high above it) still counts.
+    const maxPlayerDistSq = maxPlayerDist === Infinity ? Infinity : maxPlayerDist * maxPlayerDist
+
     const hits: { i: number; d: number }[] = []
     for (let i = 0; i < centers.length; i++) {
         const c = centers[i]
         if (segmentIntersectsBox(cam.x, cam.y, cam.z, p1x, p1y, p1z, c.x, c.y, c.z, hx, hy, hz)) {
+            if (maxPlayerDistSq !== Infinity) {
+                const pdx = c.x - player.x, pdz = c.z - player.z
+                if (pdx * pdx + pdz * pdz > maxPlayerDistSq) continue
+            }
             const d = (c.x - cam.x) ** 2 + (c.y - cam.y) ** 2 + (c.z - cam.z) ** 2
             hits.push({ i, d })
         }

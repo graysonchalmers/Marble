@@ -7,6 +7,8 @@ import { UnifiedDebugMenu } from './components/ui/UnifiedDebugMenu'
 import { MiniMap } from './components/ui/MiniMap'
 import { StartScreen, PauseScreen, GameOverScreen } from './components/ui/MenuOverlay'
 import { VersionOverlay } from './components/ui/VersionOverlay'
+import { ReplayBar } from './components/ui/ReplayBar'
+import { useReplayStore } from './state/replayStore'
 import { Box3DScene } from './components/game-beta/Box3DScene'
 import { getRuntimePhysicsBackend } from './physics/runtime'
 
@@ -21,6 +23,7 @@ function GameUI() {
     score,
     personalBest
   } = useGameStore()
+  const isReplaying = useReplayStore(s => s.isReplaying)
 
   // Handle Escape to Pause
   useEffect(() => {
@@ -123,8 +126,8 @@ function GameUI() {
       {/* Pause Overlay */}
       {isPaused && gameState === 'playing' && <PauseScreen />}
 
-      {/* Game Over Screen */}
-      {gameState === 'gameover' && (
+      {/* Game Over Screen — hidden while a replay is playing (the ReplayBar takes over) */}
+      {gameState === 'gameover' && !isReplaying && (
         <GameOverScreen score={score} onRestart={restartGame} />
       )}
 
@@ -152,6 +155,7 @@ function AppInner() {
     <>
       {physicsBackend === 'box3d' ? <Box3DScene /> : <Scene />}
       <GameUI />
+      <ReplayBar />
       <SettingsMenu />
 
       {/* Top Left Container for Title & Minimap */}

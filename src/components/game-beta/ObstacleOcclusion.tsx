@@ -58,6 +58,15 @@ type Props = {
 
 const ONE = new THREE.Vector3(1, 1, 1)
 
+// Occlusion aggressiveness — deliberately conservative so the see-through effect
+// only fades the few obstacles right around the ball, never a whole corridor.
+// The chase camera (cameraStiffness ~6) lags behind a fast ball, stretching the
+// cam→player sightline across the arena; without these caps every obstacle along
+// that long line faded at once ("all the shapes get occluded when I start moving").
+const OCCLUDE_MAX_COUNT = 4      // at most this many obstacles fade at once (was 8)
+const OCCLUDE_END_PAD = 0.6      // obstacles the ball rests against don't strobe (default)
+const OCCLUDE_PLAYER_RADIUS = 16 // only fade obstacles within 16u (xz) of the ball
+
 /** Half-extents of the shape's axis-aligned bounding box (before tilt). */
 function halfExtents(shape: ObstacleShape): [number, number, number] {
     if (shape.kind === 'box') {
@@ -119,7 +128,10 @@ export function ObstacleOcclusion({ meshRef, centers, quaternions, shape, textur
         // 'off' hides nothing — the mode-change effect already restored everything.
         const occ = mode === 'off'
             ? []
-            : findOccludingBoxes(camera.position, playerPosRef.current, centers, hx, hy, hz)
+            : findOccludingBoxes(
+                camera.position, playerPosRef.current, centers, hx, hy, hz,
+                OCCLUDE_MAX_COUNT, OCCLUDE_END_PAD, OCCLUDE_PLAYER_RADIUS,
+            )
         const occSet = new Set(occ)
         let changed = false
 
