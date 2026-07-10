@@ -1,6 +1,7 @@
 
 
 import * as THREE from 'three'
+import { computeMovementAudioParams } from './movementAudio'
 
 class SoundManager {
     ctx: AudioContext | null = null
@@ -12,6 +13,15 @@ class SoundManager {
     sonarOsc: OscillatorNode | null = null
     sonarGain: GainNode | null = null
     nextBeepTime: number = 0
+
+    // Continuous movement audio (rolling rumble + wind whoosh)
+    private noiseBuffer: AudioBuffer | null = null
+    private rollSrc: AudioBufferSourceNode | null = null
+    private rollFilter: BiquadFilterNode | null = null
+    private rollGainNode: GainNode | null = null
+    private windSrc: AudioBufferSourceNode | null = null
+    private windFilter: BiquadFilterNode | null = null
+    private windGainNode: GainNode | null = null
 
     constructor() {
         this.init()
@@ -314,6 +324,161 @@ class SoundManager {
         const finalVol = distVol * settings.audioToneVolume * globalMult
 
         this.sonarGain.gain.setTargetAtTime(finalVol, now, 0.1)
+    }
+
+    // --- Continuous Movement Audio (roll rumble + wind) ---
+
+    /** Lazily build a 2s looping white-noise buffer (shared by roll/wind/impacts). */
+    private getNoiseBuffer(): AudioBuffer | null {
+        if (!this.ctx) return null
+        if (this.noiseBuffer) return this.noiseBuffer
+        const len = Math.floor(this.ctx.sampleRate * 2)
+        const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate)
+        const data = buf.getChannelData(0)
+        for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1
+        this.noiseBuffer = buf
+        return buf
+    }
+
+    /** Spin up the two looping noise voices (roll → lowpass, wind → highpass), silent. */
+    startMovementAudio() {
+        if (!this.enabled || !this.ctx || !this.masterGain) return
+        if (this.rollSrc) return // already running
+        const buf = this.getNoiseBuffer()
+        if (!buf) return
+
+        // Roll: dull-to-bright grind. Lowpass cutoff rides speed (set in updateMovementAudio).
+        this.rollSrc = this.ctx.createBufferSource()
+        this.rollSrc.buffer = buf
+        this.rollSrc.loop = true
+        this.rollFilter = this.ctx.createBiquadFilter()
+        this.rollFilter.type = 'lowpass'
+        this.rollFilter.frequency.value = 300
+        this.rollGainNode = this.ctx.createGain()
+        this.rollGainNode.gain.value = 0
+        this.rollSrc.connect(this.rollFilter)
+        this.rollFilter.connect(this.rollGainNode)
+        this.rollGainNode.connect(this.masterGain)
+        this.rollSrc.start()
+
+        // Wind: airy highpassed noise, gain rides total speed.
+        this.windSrc = this.ctx.createBufferSource()
+        this.windSrc.buffer = buf
+        this.windSrc.loop = true
+        this.windFilter = this.ctx.createBiquadFilter()
+        this.windFilter.type = 'highpass'
+        this.windFilter.frequency.value = 700
+        this.windGainNode = this.ctx.createGain()
+        this.windGainNode.gain.value = 0
+        this.windSrc.connect(this.windFilter)
+        this.windFilter.connect(this.windGainNode)
+        this.windGainNode.connect(this.masterGain)
+        this.windSrc.start()
+    }
+
+    /** Per-frame: map current motion → roll/wind gains + roll timbre. Smoothed. */
+    updateMovementAudio(groundSpeed: number, speed: number, grounded: boolean) {
+        if (!this.enabled || !this.ctx || !this.rollGainNode || !this.windGainNode || !this.rollFilter) return
+        const now = this.ctx.currentTime
+        const p = computeMovementAudioParams(groundSpeed, speed, grounded)
+        this.rollGainNode.gain.setTargetAtTime(p.rollGain, now, 0.08)
+        this.rollFilter.frequency.setTargetAtTime(p.rollCutoff, now, 0.08)
+        this.windGainNode.gain.setTargetAtTime(p.windGain, now, 0.08)
+    }
+
+    /** Tear down the looping voices (on pause / gameover / unmount). */
+    stopMovementAudio() {
+        for (const src of [this.rollSrc, this.windSrc]) {
+            if (src) { try { src.stop(); src.disconnect() } catch { /* ignore */ } }
+        }
+        for (const node of [this.rollFilter, this.rollGainNode, this.windFilter, this.windGainNode]) {
+            if (node) { try { node.disconnect() } catch { /* ignore */ } }
+        }
+        this.rollSrc = null; this.windSrc = null
+        this.rollFilter = null; this.windFilter = null
+        this.rollGainNode = null; this.windGainNode = null
+    }
+
+    /**
+     * Percussive hit — ball into a cube/column/wall. `strength` = the sudden horizontal
+     * speed drop from the sim's onImpact (harder hit → louder + brighter + higher thump).
+     */
+    playImpact(strength: number) {
+        if (!this.enabled || !this.ctx || !this.masterGain) return
+        this.resume()
+        const s = Math.max(0, Math.min(1, strength / 15))
+        if (s < 0.03) return // ignore micro-bumps
+        const now = this.ctx.currentTime
+        const vol = 0.22 + s * 0.55
+
+        // Bandpassed noise "clack".
+        const buf = this.getNoiseBuffer()
+        if (buf) {
+            const src = this.ctx.createBufferSource()
+            src.buffer = buf
+            const bp = this.ctx.createBiquadFilter()
+            bp.type = 'bandpass'
+            bp.frequency.value = 400 + s * 900
+            bp.Q.value = 0.8
+            const g = this.ctx.createGain()
+            g.gain.setValueAtTime(vol, now)
+            g.gain.exponentialRampToValueAtTime(0.001, now + 0.12)
+            src.connect(bp); bp.connect(g); g.connect(this.masterGain)
+            src.start(now); src.stop(now + 0.14)
+            setTimeout(() => { try { bp.disconnect(); g.disconnect() } catch { /* ignore */ } }, 250)
+        }
+
+        // Low sine "thump" body.
+        const osc = this.ctx.createOscillator()
+        const og = this.ctx.createGain()
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(120 + s * 60, now)
+        osc.frequency.exponentialRampToValueAtTime(50, now + 0.12)
+        og.gain.setValueAtTime(vol * 0.8, now)
+        og.gain.exponentialRampToValueAtTime(0.001, now + 0.14)
+        osc.connect(og); og.connect(this.masterGain)
+        osc.start(now); osc.stop(now + 0.16)
+        setTimeout(() => { try { og.disconnect() } catch { /* ignore */ } }, 250)
+    }
+
+    /**
+     * Soft touchdown thud after a jump/fall. `impactSpeed` = downward speed at landing
+     * (from the sim's onLand) — harder landings are louder/deeper.
+     */
+    playLanding(impactSpeed: number) {
+        if (!this.enabled || !this.ctx || !this.masterGain) return
+        this.resume()
+        const s = Math.max(0, Math.min(1, impactSpeed / 12))
+        if (s < 0.05) return
+        const now = this.ctx.currentTime
+        const vol = 0.18 + s * 0.5
+
+        const osc = this.ctx.createOscillator()
+        const g = this.ctx.createGain()
+        osc.type = 'sine'
+        osc.frequency.setValueAtTime(90 + s * 40, now)
+        osc.frequency.exponentialRampToValueAtTime(38, now + 0.18)
+        g.gain.setValueAtTime(vol, now)
+        g.gain.exponentialRampToValueAtTime(0.001, now + 0.22)
+        osc.connect(g); g.connect(this.masterGain)
+        osc.start(now); osc.stop(now + 0.24)
+        setTimeout(() => { try { g.disconnect() } catch { /* ignore */ } }, 300)
+
+        // Soft dust puff.
+        const buf = this.getNoiseBuffer()
+        if (buf) {
+            const src = this.ctx.createBufferSource()
+            src.buffer = buf
+            const lp = this.ctx.createBiquadFilter()
+            lp.type = 'lowpass'
+            lp.frequency.value = 500
+            const ng = this.ctx.createGain()
+            ng.gain.setValueAtTime(vol * 0.4, now)
+            ng.gain.exponentialRampToValueAtTime(0.001, now + 0.16)
+            src.connect(lp); lp.connect(ng); ng.connect(this.masterGain)
+            src.start(now); src.stop(now + 0.18)
+            setTimeout(() => { try { lp.disconnect(); ng.disconnect() } catch { /* ignore */ } }, 300)
+        }
     }
 
     // --- Spatial Audio ---

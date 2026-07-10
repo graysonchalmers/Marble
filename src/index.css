@@ -520,7 +520,10 @@ canvas {
 /* UnifiedDebugMenu.tsx styles */
 .debug-menu-wrapper {
   position: absolute;
-  bottom: 20px;
+  /* Top-anchored: the toggle stays put in the top-left and the panel drops DOWN from it,
+     bounded + scrollable. (Was bottom-anchored, so a tall panel grew UPWARD off the top
+     of the screen over the title with no scrollbar.) */
+  top: 20px;
   left: 20px;
   z-index: 1000;
   font-family: 'JetBrains Mono', 'Consolas', monospace;
@@ -558,6 +561,25 @@ canvas {
   box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   color: #ccc;
   font-size: 11px;
+  /* Bounded height so the panel never runs off-screen; scroll the overflow. Top-anchored
+     wrapper (toggle ≈36px + 8px gap + 20px top) → leave ~120px so there's clear breathing
+     room above and below and it never blankets the play area / title. */
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Slim scrollbar so the capped DEV panel doesn't look chunky (WebKit + Firefox). */
+.debug-menu-content::-webkit-scrollbar {
+  width: 8px;
+}
+.debug-menu-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+}
+.debug-menu-content {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
 .debug-section-title {

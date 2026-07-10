@@ -25,6 +25,7 @@ import { MarbleSim, type SimInput } from '../../systems/sim/MarbleSim'
 import { SIM_RATE_HZ, TERRAIN, PHYSICS_PRESETS } from '../../systems/sim/tuning'
 import { getStateVisuals, type EnemyState } from '../../systems/ai/EnemyAI'
 import { CubeOcclusion } from './CubeOcclusion'
+import { ObstacleOcclusion } from './ObstacleOcclusion'
 import { Box3DParticles, dispatchFx } from './Box3DParticles'
 
 // Terrain constants (physics reads these via tuning.ts; visuals share them here)
@@ -225,10 +226,12 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
     useEffect(() => {
         if (gameState === 'playing' && !isPaused) {
             soundManager.startSonar()
+            soundManager.startMovementAudio()
         } else {
             soundManager.stopSonar()
+            soundManager.stopMovementAudio()
         }
-        return () => soundManager.stopSonar()
+        return () => { soundManager.stopSonar(); soundManager.stopMovementAudio() }
     }, [gameState, isPaused])
 
     // Reset loop + systems on restart/setup
@@ -404,9 +407,16 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
             lightTarget.current.updateMatrixWorld()
         }
 
-        // --- Audio listener + throttled store position sync (30Hz) ---
+        // --- Audio listener + movement audio + throttled store position sync (30Hz) ---
         if (gameState === 'playing') {
             soundManager.updateListener(state.camera)
+            // Rolling rumble + wind whoosh track the ball's speed (nodes are torn down on
+            // pause, so this is a no-op while paused even though gameState is still 'playing').
+            soundManager.updateMovementAudio(
+                Math.hypot(sim.playerVel.x, sim.playerVel.z),
+                sim.playerVel.length(),
+                sim.playerGrounded
+            )
         }
         uiSyncClock.current += clampedDelta
         if (uiSyncClock.current >= 0.033) {
@@ -479,9 +489,9 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
                 physics collider stays a square-footprint box (the Box3D bridge has no cylinder
                 primitive; a true round collider needs a bridge primitive + WASM rebuild → backlog).
                 Cylinder is Y-up + center-origin like the box, so the same tilt matrices apply.
-                Physics-authoritative dims from the sim — NOT the live store values. Note: columns
-                are intentionally NOT camera-occluded (unlike cubes) — occlusion.ts assumes a uniform
-                cube AABB; a tall pillar needs non-uniform extents (backlog). */}
+                Physics-authoritative dims from the sim — NOT the live store values. Columns ARE
+                camera-occluded (session 16) via ObstacleOcclusion with a non-uniform AABB
+                (columnSize × columnHeight × columnSize) and a cylinder reveal — see below. */}
             {sim.columnPositions.length > 0 && (
                 <instancedMesh
                     ref={columnsRef}
@@ -523,6 +533,22 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
                     texture={cubeTexture}
                     playerPosRef={playerRenderPosRef}
                     mode={occlusionMode}
+                />
+            )}
+
+            {/* See-through columns: same reveal modes as cubes, non-uniform AABB + cylinder reveal.
+                Detection uses the square-footprint box (matches the physics collider); the reveal
+                draws the cylinder to match the visual. Lavender tint mirrors the solid pillars. */}
+            {sim.columnPositions.length > 0 && (
+                <ObstacleOcclusion
+                    meshRef={columnsRef}
+                    centers={sim.columnPositions}
+                    quaternions={sim.columnQuaternions}
+                    shape={{ kind: 'cylinder', radius: sim.columnSize / 2, height: sim.columnHeight }}
+                    texture={cubeTexture}
+                    playerPosRef={playerRenderPosRef}
+                    mode={occlusionMode}
+                    color="#b8b0c8"
                 />
             )}
 
@@ -666,8 +692,14 @@ export function Box3DScene() {
                         if (prev === 'idle' && next === 'alert') soundManager.playAlertSound()
                         if (prev === 'chase' && next === 'search') soundManager.playLostSound()
                     },
-                    onLand: (x, y, z, s) => dispatchFx(simInstance, { type: 'land', x, y, z, strength: s }),
-                    onImpact: (x, y, z, s) => dispatchFx(simInstance, { type: 'impact', x, y, z, strength: s })
+                    onLand: (x, y, z, s) => {
+                        soundManager.playLanding(s)
+                        dispatchFx(simInstance, { type: 'land', x, y, z, strength: s })
+                    },
+                    onImpact: (x, y, z, s) => {
+                        soundManager.playImpact(s)
+                        dispatchFx(simInstance, { type: 'impact', x, y, z, strength: s })
+                    }
                 }
             })
 
