@@ -1,4 +1,4 @@
-/* ──────────────────────────────────────────────────────────
+/* ───────────────────────────────────────────────────────────────────────
    UI LAYER SYSTEM (single source of truth for stacking order).
    Every fixed/absolute overlay pulls its z-index from here so the stack is
    coherent and can't silently invert. Order (back → front):
@@ -6,7 +6,7 @@
    The MAIN MENU (start / pause / game-over) sits ABOVE the dev + settings
    panels so it's never covered; its container is click-through (pointer-
    events:none) so the panels underneath stay fully usable while a menu shows.
-   ───────────────────────────────────────────────────────── */
+   ───────────────────────────────────────────────────────────────────────── */
 :root {
   --z-hud: 10;       /* passive readouts: velocity, timer, countdown (no input) */
   --z-panel: 400;    /* side panels: DEV TOOLS, Settings, title/minimap, version */
@@ -579,7 +579,7 @@ canvas {
   color: #ccc;
   font-size: 11px;
   /* Bounded height so the panel never runs off-screen; scroll the overflow. Top-anchored
-     wrapper (toggle ≈ 36px + 8px gap + 20px top) → leave ~120px so there's clear breathing
+     wrapper (toggle ≈36px + 8px gap + 20px top) → leave ~120px so there's clear breathing
      room above and below and it never blankets the play area / title. */
   max-height: calc(100vh - 120px);
   overflow-y: auto;
