@@ -1,4 +1,4 @@
-/* ───────────────────────────────────────────────────────────────────────
+/* ─────────────────────────────────────────────────────────────────────────
    UI LAYER SYSTEM (single source of truth for stacking order).
    Every fixed/absolute overlay pulls its z-index from here so the stack is
    coherent and can't silently invert. Order (back → front):
