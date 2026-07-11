@@ -22,29 +22,24 @@ import { GameLoop } from '../../engine/loop'
 import { rulesSystem } from '../../systems/rules/RulesSystem'
 import { SonarSystem } from '../../systems/sonar/SonarSystem'
 import { MarbleSim, type SimInput } from '../../systems/sim/MarbleSim'
-import { SIM_RATE_HZ, TERRAIN, PHYSICS_PRESETS } from '../../systems/sim/tuning'
+import { SIM_RATE_HZ, TERRAIN, PHYSICS_PRESETS, FIXED_DT } from '../../systems/sim/tuning'
 import { getStateVisuals, type EnemyState } from '../../systems/ai/EnemyAI'
 import { CubeOcclusion } from './CubeOcclusion'
 import { ObstacleOcclusion } from './ObstacleOcclusion'
 import { Box3DParticles, dispatchFx } from './Box3DParticles'
+import { ReplayRecorder } from '../../systems/replay/recorder'
+import { ReplayPlayer } from '../../systems/replay/player'
+import { REPLAY_VERSION, type ReplayHeader } from '../../systems/replay/types'
+import { useReplayStore } from '../../state/replayStore'
+// Terrain is a single source of truth now (utils/terrain.ts): the collider heightfield, the
+// render mesh, obstacle placement, and downhill roll all read getTerrainHeight — and the
+// variable-floor roughness (Feature B) rides on top via setTerrainRoughness before we sample.
+import { generateTerrainHeights, setTerrainRoughness } from '../../utils/terrain'
 
 // Terrain constants (physics reads these via tuning.ts; visuals share them here)
 const WIDTH = TERRAIN.width
 const DEPTH = TERRAIN.depth
 const SCALE = TERRAIN.scale
-
-function generateTerrainHeights(): Float32Array {
-    const heights = new Float32Array(WIDTH * DEPTH)
-    let i = 0
-    for (let z = 0; z < DEPTH; z++) {
-        for (let x = 0; x < WIDTH; x++) {
-            const xn = (x / WIDTH) * 5
-            const zn = (z / DEPTH) * 5
-            heights[i++] = Math.sin(xn * 1.5) * Math.cos(zn * 1.5) * 2.5 + Math.sin(xn * 4 + zn * 2) * 0.8
-        }
-    }
-    return heights
-}
 
 function useGridTexture(colorBg: string, colorGrid: string, gridStep: number = 64) {
     return useMemo(() => {
@@ -127,13 +122,50 @@ type PlayableSceneProps = {
     sim: MarbleSim
     keys: React.MutableRefObject<SimInput>
     heights: Float32Array
+    /** Stable recorder — captures the live match tick-by-tick. */
+    recorder: ReplayRecorder
+    /** Present ⇒ this scene is a REPLAY: drive the sim from `player` instead of live input. */
+    replay?: { player: ReplayPlayer } | null
 }
 
-function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
+/** Build the deterministic replay header from the freshly-built sim + current settings. */
+function buildReplayHeader(sim: MarbleSim): ReplayHeader {
+    const s = useGameStore.getState()
+    const physics = PHYSICS_PRESETS[s.physicsPreset] ?? PHYSICS_PRESETS.current
+    return {
+        version: REPLAY_VERSION,
+        seed: sim.seed,
+        fixedDt: FIXED_DT,
+        enemySize: s.enemySize,
+        enemyMass: s.enemyMass,
+        gravityY: physics.gravityY,
+        physics,
+        obstacles: {
+            cubeCount: s.cubeCount,
+            cubeScale: s.cubeScale,
+            columnCount: s.columnCount,
+            columnSize: s.columnSize,
+            columnHeight: s.columnHeight,
+            propCount: s.propCount,
+        },
+        terrainRoughness: s.terrainRoughness,
+        recordedAt: Date.now(),
+    }
+}
+
+function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSceneProps) {
+    // Keep the latest replay controller + recorder reachable from the (stably-registered)
+    // loop ticks without re-registering them on every render.
+    const replayRef = useRef(replay)
+    replayRef.current = replay
+    const recorderRef = useRef(recorder)
+    recorderRef.current = recorder
+    const isReplay = !!replay
     const sphereRef = useRef<THREE.Mesh>(null)
     const enemyRef = useRef<THREE.Mesh>(null)
     const cubesRef = useRef<THREE.InstancedMesh>(null)
     const columnsRef = useRef<THREE.InstancedMesh>(null)
+    const propsRef = useRef<THREE.InstancedMesh>(null)
 
     // Store settings/state
     const enemySize = useGameStore(s => s.enemySize)
@@ -167,6 +199,22 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
     // never needs re-registration on state changes.
     useEffect(() => {
         const tickSim = (dt: number) => {
+            // --- REPLAY: re-simulate from the recorded stream (ignores the game-state
+            // machine and live keyboard entirely). One recorded frame per fixed step. ---
+            const rp = replayRef.current
+            if (rp) {
+                const frame = rp.player.next()
+                if (frame) {
+                    sim.step(dt, frame.input, frame.params)
+                    useReplayStore.getState().reportPosition(rp.player.position)
+                } else {
+                    // Reached the end — freeze on the last frame.
+                    useReplayStore.getState().setPaused(true)
+                }
+                return
+            }
+
+            // --- LIVE play ---
             const s = useGameStore.getState()
             const params = {
                 enemySpeed: s.enemySpeed,
@@ -197,10 +245,13 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
                     sim.resetPositions()
                     return
                 }
-                sim.step(dt, k, { ...params, freezeEnemy: true })
+                const releaseParams = { ...params, freezeEnemy: true }
+                sim.step(dt, k, releaseParams)
+                recorderRef.current.capture(k, releaseParams) // record the head-start frames too
                 return
             }
             sim.step(dt, keys.current, params)
+            recorderRef.current.capture(keys.current, params)
         }
         const tickRules = (dt: number) => rulesSystem.tick(dt)
         const tickSonar = (dt: number) => sonarSystem.tick(dt)
@@ -244,6 +295,25 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
         }
     }, [gameState, loop, sonarSystem])
 
+    // Recording lifecycle (LIVE only): start a fresh capture as the match begins,
+    // finish it at game over and hand the replay to the replay store. Skipped entirely
+    // while this scene is itself a replay.
+    useEffect(() => {
+        if (isReplay) return
+        const rec = recorder
+        if (gameState === 'countdown') {
+            rec.start(buildReplayHeader(sim))
+        } else if (gameState === 'gameover') {
+            const finished = rec.stop()
+            if (finished) {
+                finished.header.finalScore = useGameStore.getState().score
+                useReplayStore.getState().setLastReplay(finished)
+            }
+        } else if (gameState === 'setup') {
+            rec.cancel()
+        }
+    }, [gameState, sim, recorder, isReplay])
+
     // Render-side smoothing state (camera only — bodies use exact interpolation)
     const smoothedCamTarget = useRef(new THREE.Vector3(0, 6, 0))
     const lightRef = useRef<THREE.DirectionalLight>(null)
@@ -254,6 +324,9 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
     const tempQuat = useRef(new THREE.Quaternion())
     const tempTargetCamPos = useRef(new THREE.Vector3())
     const tempOffset = useRef(new THREE.Vector3())
+    // Scratch for the per-frame prop instance matrices (Feature A).
+    const propScale = useRef(new THREE.Vector3())
+    const tempMat = useRef(new THREE.Matrix4())
     const uiSyncClock = useRef(0)
 
     // Live interpolated player render position, shared with occlusion + particles.
@@ -358,12 +431,21 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
     }, [])
 
     useFrame((state, delta) => {
-        if (isPaused) return
+        // Live pause halts everything; replay ignores the live pause (it's driven by the
+        // replay store's own pause/speed instead).
+        if (!isReplay && isPaused) return
 
         const clampedDelta = Math.min(delta, 0.05)
 
-        // Advance the fixed-step loop (runs 0..N sim/rules/sonar ticks).
-        loop.advance(clampedDelta)
+        // Advance the fixed-step loop (runs 0..N sim/rules/sonar ticks). In replay, scale
+        // real time by the playback speed (and freeze on pause) so 0.5×–2× just changes how
+        // many recorded frames are consumed per second.
+        let advanceDelta = clampedDelta
+        if (isReplay) {
+            const rs = useReplayStore.getState()
+            advanceDelta = rs.paused ? 0 : clampedDelta * rs.speed
+        }
+        loop.advance(advanceDelta)
         const alpha = loop.alpha
 
         // --- Exact render interpolation: prev → curr by alpha ---
@@ -383,16 +465,44 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
             enemyRenderPosRef.current.copy(tempPos.current)
         }
 
-        // --- Camera follow (render-side smoothing) --- stiffness + distance are live store settings.
+        // --- Props: dynamic clutter, interpolated + tumbling (matrices set every frame) ---
+        if (propsRef.current && sim.propCount > 0) {
+            for (let i = 0; i < sim.propCount; i++) {
+                tempPos.current.lerpVectors(sim.propPrev[i].position, sim.propCurr[i].position, alpha)
+                tempQuat.current.slerpQuaternions(sim.propPrev[i].quaternion, sim.propCurr[i].quaternion, alpha)
+                const r = sim.propRadii[i]
+                propScale.current.set(r, r, r)
+                tempMat.current.compose(tempPos.current, tempQuat.current, propScale.current)
+                propsRef.current.setMatrixAt(i, tempMat.current)
+            }
+            propsRef.current.instanceMatrix.needsUpdate = true
+        }
+
+        // --- Camera ---
         const playerRenderPos = sphereRef.current ? sphereRef.current.position : sim.playerCurr.position
         const cameraDelta = Math.min(clampedDelta, 0.033)
         const smoothFactor = 1 - Math.exp(-cameraStiffness * cameraDelta)
-        smoothedCamTarget.current.lerp(playerRenderPos, smoothFactor * 2)
 
-        tempOffset.current.set(0, cameraOffset * 0.5, cameraOffset)
-        tempTargetCamPos.current.copy(smoothedCamTarget.current).add(tempOffset.current)
-        state.camera.position.lerp(tempTargetCamPos.current, smoothFactor)
-        state.camera.lookAt(smoothedCamTarget.current)
+        if (isReplay && useReplayStore.getState().camera === 'orbit') {
+            // Cinematic orbit: circle the player at a fixed radius/height, always looking at it.
+            // Uses the render clock (not sim time) so the orbit keeps gliding even while paused.
+            const t = state.clock.elapsedTime
+            const radius = Math.max(10, cameraOffset)
+            const orbitX = playerRenderPos.x + Math.cos(t * 0.45) * radius
+            const orbitZ = playerRenderPos.z + Math.sin(t * 0.45) * radius
+            const orbitY = playerRenderPos.y + cameraOffset * 0.55
+            tempTargetCamPos.current.set(orbitX, orbitY, orbitZ)
+            state.camera.position.lerp(tempTargetCamPos.current, smoothFactor)
+            smoothedCamTarget.current.lerp(playerRenderPos, smoothFactor * 2)
+            state.camera.lookAt(smoothedCamTarget.current)
+        } else {
+            // Chase follow (render-side smoothing) — stiffness + distance are live store settings.
+            smoothedCamTarget.current.lerp(playerRenderPos, smoothFactor * 2)
+            tempOffset.current.set(0, cameraOffset * 0.5, cameraOffset)
+            tempTargetCamPos.current.copy(smoothedCamTarget.current).add(tempOffset.current)
+            state.camera.position.lerp(tempTargetCamPos.current, smoothFactor)
+            state.camera.lookAt(smoothedCamTarget.current)
+        }
 
         // --- Light follow ---
         if (lightRef.current && lightTarget.current) {
@@ -476,6 +586,12 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
                     args={[undefined, undefined, sim.cubePositions.length]}
                     castShadow
                     receiveShadow
+                    // Instances are scattered across the whole arena, but an InstancedMesh's
+                    // default bounding sphere is the single-cube geometry at the LOCAL origin —
+                    // so Three frustum-culls the entire mesh (all cubes vanish at once) the moment
+                    // the camera pans away from origin. Disable culling: the obstacles are always
+                    // potentially on-screen. (Occlusion see-through is a separate, wanted effect.)
+                    frustumCulled={false}
                 >
                     {/* Physics-authoritative scale from the sim — NOT the live store value,
                         which can drift from the colliders built at sim construction. */}
@@ -498,9 +614,31 @@ function Box3DPlayableScene({ sim, keys, heights }: PlayableSceneProps) {
                     args={[undefined, undefined, sim.columnPositions.length]}
                     castShadow
                     receiveShadow
+                    // Same fix as the cubes: don't frustum-cull the whole pillar mesh by its
+                    // origin-centered default bounding sphere (all columns vanish together on pan).
+                    frustumCulled={false}
                 >
                     <cylinderGeometry args={[sim.columnSize / 2, sim.columnSize / 2, sim.columnHeight, 20]} />
                     <meshStandardMaterial map={cubeTexture} color="#b8b0c8" />
+                </instancedMesh>
+            )}
+
+            {/* Scattered props (Feature A): dynamic knock-around clutter. Collider is a sphere
+                (the only dynamic primitive), but the visual is a faceted rubble chunk (icosahedron,
+                per-instance scaled by the sim's collider radius) so it reads as debris you plow
+                through — not a ball pit. Matrices are updated EVERY frame from the sim snapshots
+                (props move), and frustum culling is off (same origin-bounding-sphere gotcha the
+                cubes/columns hit). The chunk tumbles with the body's real rotation as it's knocked. */}
+            {sim.propCount > 0 && (
+                <instancedMesh
+                    ref={propsRef}
+                    args={[undefined, undefined, sim.propCount]}
+                    castShadow
+                    receiveShadow
+                    frustumCulled={false}
+                >
+                    <icosahedronGeometry args={[1, 0]} />
+                    <meshStandardMaterial map={cubeTexture} color="#c9b79c" roughness={0.9} metalness={0.05} />
                 </instancedMesh>
             )}
 
@@ -589,6 +727,10 @@ export function Box3DScene() {
     const columnHeight = useGameStore(s => s.columnHeight)
     const enemySize = useGameStore(s => s.enemySize)
     const enemyMass = useGameStore(s => s.enemyMass)
+    // Phase P: prop count is baked at sim construction (rebuild on change, like the obstacles);
+    // terrain roughness rebuilds the heights array + collider (see the heights memo below).
+    const propCount = useGameStore(s => s.propCount)
+    const terrainRoughness = useGameStore(s => s.terrainRoughness)
 
     // Stable obstacle-scatter seed for this page session: rebuilds triggered by a settings
     // change keep the SAME layout (only the changed dimension updates) instead of reshuffling
@@ -605,10 +747,29 @@ export function Box3DScene() {
     const frozen = isPaused || gameState === 'gameover'
     const shadowsEnabled = useGameStore(s => s.shadowsEnabled)
 
+    // Replay: when active, the sim is rebuilt from the recorded header (not live settings)
+    // and driven by the recorded stream. `epoch` bumps on start/restart to force a rebuild.
+    const isReplaying = useReplayStore(s => s.isReplaying)
+    const replayEpoch = useReplayStore(s => s.epoch)
+    // During replay, rebuild the terrain from the recorded roughness so the collider matches the
+    // captured run (old replays without it fall back to the live value). Live play uses the store.
+    const replayRoughness = useReplayStore(s => s.lastReplay?.header?.terrainRoughness)
+    const effectiveRoughness = isReplaying ? (replayRoughness ?? terrainRoughness) : terrainRoughness
+    // Stable recorder for the whole session; the playable scene captures into it live.
+    const recorderRef = useRef<ReplayRecorder>(null as unknown as ReplayRecorder)
+    if (recorderRef.current === null) recorderRef.current = new ReplayRecorder()
+    // The active replay player (rebuilt each boot while replaying), handed to the scene.
+    const replayPlayerRef = useRef<{ player: ReplayPlayer } | null>(null)
+
     // Input captured into a ref — zero React re-renders on keypress.
     const keys = useRef<SimInput>({ w: false, a: false, s: false, d: false, space: false, shift: false })
 
-    const heights = useMemo(() => generateTerrainHeights(), [])
+    // Set the variable-floor roughness BEFORE sampling — generateTerrainHeights → getTerrainHeight
+    // reads it, so the collider heightfield + render mesh + sim's analytic terrain all agree.
+    const heights = useMemo(() => {
+        setTerrainRoughness(effectiveRoughness)
+        return generateTerrainHeights()
+    }, [effectiveRoughness])
 
     useEffect(() => {
         const set = (key: string, down: boolean) => {
@@ -655,28 +816,40 @@ export function Box3DScene() {
             if (!active) { worldInstance.destroy(); worldInstance = null; return }
 
             const storeState = useGameStore.getState()
-            // Resolve the selected physics feel preset. Gravity is applied to the world
-            // here (set at creation); friction + jump ride into the sim via `physics` below.
-            const physics = PHYSICS_PRESETS[storeState.physicsPreset] ?? PHYSICS_PRESETS.current
 
-            worldInstance.reset(physics.gravityY) // Clears default smoke scene + applies preset gravity
+            // REPLAY vs LIVE source: when replaying, rebuild the sim EXACTLY from the recorded
+            // header (seed / enemy / obstacles / gravity) so it re-simulates the captured run;
+            // otherwise build from live settings. Terrain is session-constant either way.
+            const replaySt = useReplayStore.getState()
+            const header = replaySt.isReplaying ? replaySt.lastReplay?.header ?? null : null
+
+            // Resolve physics feel. Gravity is applied to the world here (set at creation);
+            // friction + jump ride into the sim via `physics` below.
+            const physics = header
+                ? (header.physics ?? PHYSICS_PRESETS.current)
+                : (PHYSICS_PRESETS[storeState.physicsPreset] ?? PHYSICS_PRESETS.current)
+
+            worldInstance.reset(header ? header.gravityY : physics.gravityY) // clears smoke scene + sets gravity
 
             const simInstance = new MarbleSim(worldInstance, {
                 heights,
-                enemySize: storeState.enemySize,
-                enemyMass: storeState.enemyMass,
+                enemySize: header ? header.enemySize : storeState.enemySize,
+                enemyMass: header ? header.enemyMass : storeState.enemyMass,
                 physics,
-                // Stable per-session seed (seedRef) so a settings-driven rebuild keeps the
-                // same layout; sim.seed records it so a future replay system can reproduce
-                // this exact run (F9).
-                seed: seedRef.current ?? 0,
-                obstacles: {
+                // Replay: use the recorded seed (bit-identical run). Live: stable per-session
+                // seed so a settings rebuild keeps the same layout; sim.seed records it (F9).
+                seed: header ? header.seed : (seedRef.current ?? 0),
+                ...(header?.playerSpawn ? { playerSpawn: header.playerSpawn } : {}),
+                ...(header?.enemySpawn ? { enemySpawn: header.enemySpawn } : {}),
+                obstacles: header?.obstacles ?? {
                     cubeCount: storeState.cubeCount,
                     cubeScale: storeState.cubeScale,
                     // Tall pillars (Obst-2) — live-tunable in SettingsMenu → Environment (apply on restart).
                     columnCount: storeState.columnCount,
                     columnSize: storeState.columnSize,
-                    columnHeight: storeState.columnHeight
+                    columnHeight: storeState.columnHeight,
+                    // Scattered dynamic props (Feature A) — knock-around clutter.
+                    propCount: storeState.propCount
                 },
                 events: {
                     onTag: () => {
@@ -703,6 +876,16 @@ export function Box3DScene() {
                 }
             })
 
+            // Replay: build a fresh player over the recorded frames (seek to the requested
+            // start frame — MVP always 0). Live: no player.
+            if (header) {
+                const player = new ReplayPlayer(replaySt.lastReplay!)
+                player.seek(replaySt.seekFrame)
+                replayPlayerRef.current = { player }
+            } else {
+                replayPlayerRef.current = null
+            }
+
             setSim(simInstance)
             setStatus({ loaded: true })
         }
@@ -722,7 +905,8 @@ export function Box3DScene() {
         }
         // Arena/enemy settings are baked at construction, so a change to any of them
         // rebuilds the world+sim (stable seed keeps the layout coherent across rebuilds).
-    }, [heights, physicsPreset, cubeCount, cubeScale, columnCount, columnSize, columnHeight, enemySize, enemyMass])
+        // isReplaying/replayEpoch also rebuild: entering/leaving replay, or restarting it.
+    }, [heights, physicsPreset, cubeCount, cubeScale, columnCount, columnSize, columnHeight, propCount, enemySize, enemyMass, isReplaying, replayEpoch])
 
     if (status.error) {
         return (
@@ -738,8 +922,20 @@ export function Box3DScene() {
     }
 
     return (
-        <Canvas camera={{ position: [0, 8, 12], fov: 45 }} shadows={shadowsEnabled} frameloop={frozen ? 'demand' : 'always'}>
-            <Box3DPlayableScene sim={sim} keys={keys} heights={heights} />
+        <Canvas
+            camera={{ position: [0, 8, 12], fov: 45 }}
+            shadows={shadowsEnabled}
+            // Replay always renders (it drives its own pause via the replay store); otherwise
+            // the pause/game-over freeze idles the GPU.
+            frameloop={(isReplaying || !frozen) ? 'always' : 'demand'}
+        >
+            <Box3DPlayableScene
+                sim={sim}
+                keys={keys}
+                heights={heights}
+                recorder={recorderRef.current}
+                replay={isReplaying ? replayPlayerRef.current : null}
+            />
         </Canvas>
     )
 }

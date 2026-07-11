@@ -29,12 +29,13 @@ import {
     type EnemyState
 } from '../ai/EnemyAI'
 import {
-    TERRAIN, PLAYER, ENEMY, RULES, OBSTACLES, PHYSICS_PRESETS, DEFAULT_PHYSICS_PRESET,
+    TERRAIN, PLAYER, ENEMY, RULES, OBSTACLES, PROPS, PHYSICS_PRESETS, DEFAULT_PHYSICS_PRESET,
     MOVEMENT, DEFAULT_DRIFT, DEFAULT_DOWNHILL_ROLL, FX
 } from './tuning'
 import type { PhysicsFeel } from './tuning'
 import { getTerrainHeight, getTerrainNormal } from '../../utils/terrain'
 import { mulberry32, DEFAULT_SIM_SEED } from './rng'
+import { computeEjection } from './unstick'
 
 /** World up — obstacles tilt from this toward the local terrain normal. */
 const WORLD_UP = new THREE.Vector3(0, 1, 0)
@@ -95,6 +96,11 @@ export interface ObstacleConfig {
     columnCount: number
     columnSize: number
     columnHeight: number
+    /**
+     * Phase P Feature A: scattered dynamic knock-around props (dynamic spheres). Optional +
+     * defaults to 0 so every existing caller/test stays byte-identical (no props unless asked).
+     */
+    propCount?: number
 }
 
 export interface BodySnapshot {
@@ -127,6 +133,12 @@ export interface MarbleSimConfig {
 }
 
 const NO_INPUT: SimInput = { w: false, a: false, s: false, d: false, space: false, shift: false }
+
+// Un-embed safety net: horizontal ejection speed + upward pop applied when the ball is
+// found INSIDE a static obstacle collider (see MarbleSim.ejectFromObstacle). Tuned to eject
+// decisively over a couple of steps without launching the ball across the arena.
+const EJECT_SPEED = 12
+const EJECT_UP = 4
 
 export class MarbleSim {
     readonly world: Box3DWorld
@@ -189,6 +201,18 @@ export class MarbleSim {
      */
     readonly cubeQuaternions: THREE.Quaternion[] = []
     readonly columnQuaternions: THREE.Quaternion[] = []
+
+    /**
+     * Phase P Feature A: scattered dynamic props (dynamic spheres knocked around by play).
+     * `propRadii` + `propSpawns` are public for the renderer/tests; the live transforms ride
+     * in `propPrev`/`propCurr` (interpolation snapshots, like the player/enemy). All index-aligned.
+     */
+    readonly propCount: number
+    private readonly propBodyPtrs: number[] = []
+    readonly propRadii: number[] = []
+    readonly propSpawns: { x: number; y: number; z: number }[] = []
+    readonly propPrev: BodySnapshot[] = []
+    readonly propCurr: BodySnapshot[] = []
 
     private readonly events: SimEvents
     private readonly playerSpawn: { x: number; y: number; z: number }
@@ -290,6 +314,30 @@ export class MarbleSim {
         )
         world.setDamping(this.enemyBodyPtr, ENEMY.linearDamping, ENEMY.angularDamping)
 
+        // --- Scattered dynamic props (Feature A) ---
+        // Dynamic spheres are the only dynamic collider the bridge exposes, so props are spheres
+        // (a faceted chunk visual rides on top in the scene). Seeded scatter (drawn AFTER cubes +
+        // columns from the same stream, so it stays deterministic given seed + counts), varied
+        // radius, dropped above the terrain so they settle. Knocked around by the player/enemy for
+        // free (they're bodies in the same world). NOTE: the enemy's vision/avoidance raycasts hit
+        // these too (the bridge ray has no body filter) — modest count keeps that as "soft cover."
+        this.propCount = obstacles?.propCount ?? 0
+        if (this.propCount > 0) {
+            const pts = this.scatterPoints(this.propCount)
+            for (let i = 0; i < this.propCount; i++) {
+                const { x, z } = pts[i]
+                const radius = PROPS.minRadius + this.rand() * (PROPS.maxRadius - PROPS.minRadius)
+                const y = getTerrainHeight(x, z) + radius + PROPS.dropHeight
+                const ptr = world.createDynamicSphere(x, y, z, radius, PROPS.density, PROPS.friction, PROPS.restitution)
+                world.setDamping(ptr, PROPS.linearDamping, PROPS.angularDamping)
+                this.propBodyPtrs.push(ptr)
+                this.propRadii.push(radius)
+                this.propSpawns.push({ x, y, z })
+                this.propPrev.push({ position: new THREE.Vector3(), quaternion: new THREE.Quaternion() })
+                this.propCurr.push({ position: new THREE.Vector3(), quaternion: new THREE.Quaternion() })
+            }
+        }
+
         this.syncSnapshots(true)
     }
 
@@ -324,6 +372,14 @@ export class MarbleSim {
         this.jumpCooldownLeft = 0
         this.avoidanceForce.set(0, 0, 0)
         this.cachedTarget.set(0, 0, 0)
+
+        // Return props to their spawn (clears any that got knocked around last round).
+        for (let i = 0; i < this.propCount; i++) {
+            const s = this.propSpawns[i]
+            w.bodySetTransform(this.propBodyPtrs[i], s.x, s.y, s.z, 0, 0, 0, 1)
+            w.setLinearVelocity(this.propBodyPtrs[i], 0, 0, 0)
+            w.setAngularVelocity(this.propBodyPtrs[i], 0, 0, 0)
+        }
 
         this.syncSnapshots(true)
     }
@@ -442,6 +498,19 @@ export class MarbleSim {
     }
 
     /**
+     * Un-embed safety net — see systems/sim/unstick.ts. Returns an ejection velocity if the
+     * ball center is inside a static obstacle collider AABB, else null.
+     */
+    private ejectFromObstacle(px: number, py: number, pz: number): { x: number; y: number; z: number } | null {
+        return computeEjection(
+            px, py, pz,
+            this.cubePositions, this.cubeScale,
+            this.columnPositions, this.columnSize, this.columnHeight,
+            { ejectSpeed: EJECT_SPEED, ejectUp: EJECT_UP },
+        )
+    }
+
+    /**
      * Velocity-driven enemy control (mirrors the player, per Grayson's "same idea").
      * Drives the enemy's horizontal velocity toward its AI heading at a state-scaled
      * top speed (chase fastest), with avoidance rotating the heading, and slaves spin
@@ -508,6 +577,10 @@ export class MarbleSim {
         this.playerPrev.quaternion.copy(this.playerCurr.quaternion)
         this.enemyPrev.position.copy(this.enemyCurr.position)
         this.enemyPrev.quaternion.copy(this.enemyCurr.quaternion)
+        for (let i = 0; i < this.propCount; i++) {
+            this.propPrev[i].position.copy(this.propCurr[i].position)
+            this.propPrev[i].quaternion.copy(this.propCurr[i].quaternion)
+        }
 
         // --- Read state (end of previous step) ---
         const playerTrans = w.readBodyTransform(this.playerBodyPtr)
@@ -539,7 +612,18 @@ export class MarbleSim {
         }
         this.playerGrounded = isGrounded
 
-        this.applyVelocityControl(w, input, isGrounded, playerVel, dt, params, playerTrans.position.x, playerTrans.position.z)
+        // Un-embed safety net: if the ball has ended up INSIDE a static obstacle collider
+        // (tunneled in at speed, or clipped a cube while landing), the velocity model below
+        // would clobber the physics solver's push-out every step and trap it ("stuck inside a
+        // cube, can't move"). Detect deep penetration and eject out the nearest face instead.
+        // Normal play never triggers this — the ball center is never inside a collider — so
+        // feel is untouched, and it's pure math on sim-owned positions (determinism intact).
+        const eject = this.ejectFromObstacle(playerTrans.position.x, playerTrans.position.y, playerTrans.position.z)
+        if (eject) {
+            w.setLinearVelocity(this.playerBodyPtr, eject.x, eject.y, eject.z)
+        } else {
+            this.applyVelocityControl(w, input, isGrounded, playerVel, dt, params, playerTrans.position.x, playerTrans.position.z)
+        }
 
         // Jump (sim-time cooldown; was wall-clock setTimeout).
         // Set vertical velocity directly from a target apex HEIGHT: v = sqrt(2·|g|·h).
@@ -667,6 +751,16 @@ export class MarbleSim {
             w.setLinearVelocity(this.enemyBodyPtr, 0, 0, 0)
             w.setAngularVelocity(this.enemyBodyPtr, 0, 0, 0)
         }
+        // Props: respawn any that get knocked off the world so the clutter persists.
+        for (let i = 0; i < this.propCount; i++) {
+            const pt = w.readBodyTransform(this.propBodyPtrs[i])
+            if (pt.position.y < RULES.fallResetY) {
+                const s = this.propSpawns[i]
+                w.bodySetTransform(this.propBodyPtrs[i], s.x, s.y, s.z, 0, 0, 0, 1)
+                w.setLinearVelocity(this.propBodyPtrs[i], 0, 0, 0)
+                w.setAngularVelocity(this.propBodyPtrs[i], 0, 0, 0)
+            }
+        }
 
         // Update FX edge-detection trackers (guard against fall-reset false positives).
         this.prevGrounded = playerReset ? false : isGrounded
@@ -717,6 +811,16 @@ export class MarbleSim {
         const et = this.world.readBodyTransform(this.enemyBodyPtr)
         this.enemyCurr.position.set(et.position.x, et.position.y, et.position.z)
         this.enemyCurr.quaternion.set(et.rotation.x, et.rotation.y, et.rotation.z, et.rotation.w)
+
+        for (let i = 0; i < this.propCount; i++) {
+            const t = this.world.readBodyTransform(this.propBodyPtrs[i])
+            this.propCurr[i].position.set(t.position.x, t.position.y, t.position.z)
+            this.propCurr[i].quaternion.set(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w)
+            if (hard) {
+                this.propPrev[i].position.copy(this.propCurr[i].position)
+                this.propPrev[i].quaternion.copy(this.propCurr[i].quaternion)
+            }
+        }
 
         if (hard) {
             this.playerPrev.position.copy(this.playerCurr.position)
