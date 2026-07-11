@@ -102,6 +102,32 @@ export class Box3DWorld implements PhysicsWorldAdapter {
         return bodyPtr
     }
 
+    /**
+     * Dynamic box (Feature C "real" path): a movable rigid body whose collider is a box with
+     * half-extents hx/hy/hz. Used for crumble debris (collider matches the shard visual) and the
+     * primitive for future stacking/toppling crumble + rotated obstacle colliders. Spawns
+     * axis-aligned; give it spin via setAngularVelocity.
+     */
+    createDynamicBox(x: number, y: number, z: number, hx: number, hy: number, hz: number, density = 1.0, friction = 0.5, restitution = 0.2): number {
+        if (!this.worldPtr) throw new Error('World not initialized')
+        const bodyPtr = this.bridge.createDynamicBox(this.worldPtr, x, y, z, hx, hy, hz, density, friction, restitution)
+        if (!bodyPtr) throw new Error('Failed to create dynamic box')
+        this.bodies.push(bodyPtr)
+        return bodyPtr
+    }
+
+    /**
+     * Destroy a single body (removing it from the tracked list so world teardown
+     * doesn't double-free it). Used by Feature C to retire crumble debris mid-round.
+     * The native destroy (Known #7 fix) removes the body from the Box3D world before
+     * freeing its JS wrapper.
+     */
+    destroyBody(bodyPtr: number): void {
+        const idx = this.bodies.indexOf(bodyPtr)
+        if (idx >= 0) this.bodies.splice(idx, 1)
+        this.bridge.bodyDestroy(bodyPtr)
+    }
+
     createHeightfield(heights: Float32Array, countX: number, countZ: number, scaleX: number, scaleY: number, scaleZ: number, minHeight: number, maxHeight: number, friction = 0.5, restitution = 0.2): number {
         if (!this.worldPtr) throw new Error('World not initialized')
 

@@ -147,6 +147,7 @@ function buildReplayHeader(sim: MarbleSim): ReplayHeader {
             columnSize: s.columnSize,
             columnHeight: s.columnHeight,
             propCount: s.propCount,
+            crumbleCount: s.crumbleCount,
         },
         terrainRoughness: s.terrainRoughness,
         recordedAt: Date.now(),
@@ -166,6 +167,8 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
     const cubesRef = useRef<THREE.InstancedMesh>(null)
     const columnsRef = useRef<THREE.InstancedMesh>(null)
     const propsRef = useRef<THREE.InstancedMesh>(null)
+    const crumbleRef = useRef<THREE.InstancedMesh>(null)
+    const debrisRef = useRef<THREE.InstancedMesh>(null)
 
     // Store settings/state
     const enemySize = useGameStore(s => s.enemySize)
@@ -327,6 +330,11 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
     // Scratch for the per-frame prop instance matrices (Feature A).
     const propScale = useRef(new THREE.Vector3())
     const tempMat = useRef(new THREE.Matrix4())
+    // Feature C scratch: crumble-block position/scale + debris shard scale.
+    const crumblePos = useRef(new THREE.Vector3())
+    const crumbleScaleV = useRef(new THREE.Vector3())
+    const debrisScaleV = useRef(new THREE.Vector3())
+    const identQuat = useRef(new THREE.Quaternion())
     const uiSyncClock = useRef(0)
 
     // Live interpolated player render position, shared with occlusion + particles.
@@ -476,6 +484,39 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
                 propsRef.current.setMatrixAt(i, tempMat.current)
             }
             propsRef.current.instanceMatrix.needsUpdate = true
+        }
+
+        // --- Crumble blocks (Feature C): static until smashed, then hidden (debris takes over) ---
+        if (crumbleRef.current && sim.crumbleCount > 0) {
+            for (let i = 0; i < sim.crumbleCount; i++) {
+                if (sim.crumbleAlive[i]) {
+                    crumblePos.current.copy(sim.crumblePositions[i])
+                    crumbleScaleV.current.set(sim.crumbleScale, sim.crumbleScale, sim.crumbleScale)
+                    tempMat.current.compose(crumblePos.current, sim.crumbleQuaternions[i] ?? identQuat.current, crumbleScaleV.current)
+                } else {
+                    tempMat.current.makeScale(0, 0, 0)
+                }
+                crumbleRef.current.setMatrixAt(i, tempMat.current)
+            }
+            crumbleRef.current.instanceMatrix.needsUpdate = true
+        }
+
+        // --- Crumble debris (Feature C): dynamic shards, interpolated + tumbling; unused slots hidden ---
+        if (debrisRef.current) {
+            const nDebris = sim.debrisActiveCount
+            for (let i = 0; i < sim.maxLiveDebris; i++) {
+                if (i < nDebris) {
+                    tempPos.current.lerpVectors(sim.debrisPrev[i].position, sim.debrisCurr[i].position, alpha)
+                    tempQuat.current.slerpQuaternions(sim.debrisPrev[i].quaternion, sim.debrisCurr[i].quaternion, alpha)
+                    const sc = sim.debrisScales[i]
+                    debrisScaleV.current.set(sc.x, sc.y, sc.z)
+                    tempMat.current.compose(tempPos.current, tempQuat.current, debrisScaleV.current)
+                } else {
+                    tempMat.current.makeScale(0, 0, 0)
+                }
+                debrisRef.current.setMatrixAt(i, tempMat.current)
+            }
+            debrisRef.current.instanceMatrix.needsUpdate = true
         }
 
         // --- Camera ---
@@ -642,6 +683,39 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
                 </instancedMesh>
             )}
 
+            {/* Crumble blocks (Feature C): solid static "crates" that vanish when smashed (the
+                useFrame loop zero-scales a block's instance the moment sim.crumbleAlive[i] flips).
+                Unit box geometry — the per-instance matrix carries the physics-authoritative
+                crumbleScale + terrain tilt (compose with scale, so zero-scale hiding is clean).
+                Rust-red tint so they read as breakable, distinct from the grey cubes. */}
+            {sim.crumbleCount > 0 && (
+                <instancedMesh
+                    ref={crumbleRef}
+                    args={[undefined, undefined, sim.crumbleCount]}
+                    castShadow
+                    receiveShadow
+                    frustumCulled={false}
+                >
+                    <boxGeometry args={[1, 1, 1]} />
+                    <meshStandardMaterial map={cubeTexture} color="#b5674a" roughness={0.85} metalness={0.05} />
+                </instancedMesh>
+            )}
+
+            {/* Crumble debris (Feature C "real" path): a fixed pool of maxLiveDebris instances.
+                Collider is a real dynamic BOX (marble_box3d_create_dynamic_box) whose half-extents
+                match this shard exactly (sim.debrisScales) — the box you see IS the box that
+                collides, tumbling with the body. Live slots filled each frame; the rest zero-scaled. */}
+            <instancedMesh
+                ref={debrisRef}
+                args={[undefined, undefined, sim.maxLiveDebris]}
+                castShadow
+                receiveShadow
+                frustumCulled={false}
+            >
+                <boxGeometry args={[1, 1, 1]} />
+                <meshStandardMaterial map={cubeTexture} color="#a85a3c" roughness={0.9} metalness={0.05} />
+            </instancedMesh>
+
             {/* Player Sphere Visual Mesh */}
             <mesh ref={sphereRef} castShadow>
                 <sphereGeometry args={[0.5, 32, 16]} />
@@ -731,6 +805,7 @@ export function Box3DScene() {
     // terrain roughness rebuilds the heights array + collider (see the heights memo below).
     const propCount = useGameStore(s => s.propCount)
     const terrainRoughness = useGameStore(s => s.terrainRoughness)
+    const crumbleCount = useGameStore(s => s.crumbleCount)
 
     // Stable obstacle-scatter seed for this page session: rebuilds triggered by a settings
     // change keep the SAME layout (only the changed dimension updates) instead of reshuffling
@@ -849,7 +924,9 @@ export function Box3DScene() {
                     columnSize: storeState.columnSize,
                     columnHeight: storeState.columnHeight,
                     // Scattered dynamic props (Feature A) — knock-around clutter.
-                    propCount: storeState.propCount
+                    propCount: storeState.propCount,
+                    // Crashable crumble blocks (Feature C) — smash into debris at speed.
+                    crumbleCount: storeState.crumbleCount
                 },
                 events: {
                     onTag: () => {
@@ -906,7 +983,7 @@ export function Box3DScene() {
         // Arena/enemy settings are baked at construction, so a change to any of them
         // rebuilds the world+sim (stable seed keeps the layout coherent across rebuilds).
         // isReplaying/replayEpoch also rebuild: entering/leaving replay, or restarting it.
-    }, [heights, physicsPreset, cubeCount, cubeScale, columnCount, columnSize, columnHeight, propCount, enemySize, enemyMass, isReplaying, replayEpoch])
+    }, [heights, physicsPreset, cubeCount, cubeScale, columnCount, columnSize, columnHeight, propCount, crumbleCount, enemySize, enemyMass, isReplaying, replayEpoch])
 
     if (status.error) {
         return (

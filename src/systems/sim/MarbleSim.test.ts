@@ -10,7 +10,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { Box3DWorld } from '../../physics/box3d/Box3DWorld'
 import type { MarbleBox3DBridgeExports } from '../../physics/box3d/box3dBridge'
 import { MarbleSim } from './MarbleSim'
-import { OBSTACLES, PROPS } from './tuning'
+import { OBSTACLES, PROPS, CRUMBLE } from './tuning'
 import { getTerrainHeight } from '../../utils/terrain'
 
 function makeBridge(): MarbleBox3DBridgeExports {
@@ -37,6 +37,7 @@ function makeBridge(): MarbleBox3DBridgeExports {
         worldStep: vi.fn(() => 1),
         createStaticBox: vi.fn(() => nextBodyId++),
         createDynamicSphere: vi.fn(() => nextBodyId++),
+        createDynamicBox: vi.fn(() => nextBodyId++),
         createHeightfield: vi.fn(() => nextBodyId++),
         bodyDestroy: vi.fn(),
         bodyApplyTorque: vi.fn(),
@@ -240,5 +241,97 @@ describe('MarbleSim scattered props (Phase P, Feature A)', () => {
             a.propSpawns[0].z !== c.propSpawns[0].z ||
             a.propRadii[0] !== c.propRadii[0]
         ).toBe(true)
+    })
+})
+
+describe('MarbleSim crumble blocks (Phase P, Feature C)', () => {
+    const baseObstacles = { cubeCount: 0, cubeScale: 7, columnCount: 0, columnSize: 3, columnHeight: 12 }
+
+    it('creates no crumble blocks when crumbleCount is omitted (backward compatible)', () => {
+        const { world, bridge } = makeWorld()
+        const sim = new MarbleSim(world, { enemySize: 0.9, enemyMass: 2.5 })
+        expect(sim.crumbleCount).toBe(0)
+        expect(sim.crumblePositions).toHaveLength(0)
+        expect(sim.crumbleAlive).toHaveLength(0)
+        expect(sim.debrisActiveCount).toBe(0)
+        // Only the flat-slab floor static box — no crumble blocks.
+        expect(bridge.createStaticBox).toHaveBeenCalledTimes(1)
+    })
+
+    it('scatters crumbleCount static blocks, all alive + outside the clear radius, dims exposed', () => {
+        const { world, bridge } = makeWorld()
+        const crumbleCount = 6
+        const sim = new MarbleSim(world, {
+            enemySize: 0.9,
+            enemyMass: 2.5,
+            obstacles: { ...baseObstacles, crumbleCount },
+        })
+
+        expect(sim.crumbleCount).toBe(crumbleCount)
+        expect(sim.crumblePositions).toHaveLength(crumbleCount)
+        expect(sim.crumbleQuaternions).toHaveLength(crumbleCount)
+        expect(sim.crumbleAlive).toHaveLength(crumbleCount)
+        expect(sim.crumbleAlive.every(a => a === true)).toBe(true)
+        expect(sim.crumbleScale).toBe(CRUMBLE.scale)
+        expect(sim.debrisActiveCount).toBe(0)
+
+        // 1 flat-slab floor + crumbleCount crumble blocks (no cubes/columns here).
+        expect(bridge.createStaticBox).toHaveBeenCalledTimes(1 + crumbleCount)
+
+        const clearSq = OBSTACLES.clearRadius * OBSTACLES.clearRadius
+        for (const p of sim.crumblePositions) {
+            expect(p.x * p.x + p.z * p.z).toBeGreaterThanOrEqual(clearSq)
+        }
+    })
+
+    it('rests each crumble block half-height above the analytic terrain', () => {
+        const { world } = makeWorld()
+        const sim = new MarbleSim(world, {
+            enemySize: 0.9,
+            enemyMass: 2.5,
+            obstacles: { ...baseObstacles, crumbleCount: 5 },
+        })
+        for (const p of sim.crumblePositions) {
+            expect(p.y).toBeCloseTo(getTerrainHeight(p.x, p.z) + CRUMBLE.scale / 2, 5)
+        }
+    })
+
+    it('is seed-deterministic: same seed → identical block layout, different seed → different (F9)', () => {
+        const obstacles = { ...baseObstacles, crumbleCount: 8 }
+        const build = (seed: number) =>
+            new MarbleSim(makeWorld().world, { enemySize: 0.9, enemyMass: 2.5, seed, obstacles })
+
+        const a = build(42)
+        const b = build(42)
+        const c = build(1337)
+
+        a.crumblePositions.forEach((p, i) => {
+            expect(p.x).toBe(b.crumblePositions[i].x)
+            expect(p.z).toBe(b.crumblePositions[i].z)
+        })
+        expect(
+            a.crumblePositions[0].x !== c.crumblePositions[0].x ||
+            a.crumblePositions[0].z !== c.crumblePositions[0].z
+        ).toBe(true)
+    })
+
+    it('adding crumble blocks does NOT shift prop determinism (crumble is drawn last)', () => {
+        // Props are drawn before crumble from the same seeded stream, so a run that also has
+        // crumble blocks must produce byte-identical props to a run without them (proves the
+        // additive-safety property that keeps every existing prop/F9 test valid).
+        const seed = 777
+        const withoutCrumble = new MarbleSim(makeWorld().world, {
+            enemySize: 0.9, enemyMass: 2.5, seed,
+            obstacles: { ...baseObstacles, propCount: 10 },
+        })
+        const withCrumble = new MarbleSim(makeWorld().world, {
+            enemySize: 0.9, enemyMass: 2.5, seed,
+            obstacles: { ...baseObstacles, propCount: 10, crumbleCount: 6 },
+        })
+        withoutCrumble.propSpawns.forEach((s, i) => {
+            expect(withCrumble.propSpawns[i].x).toBe(s.x)
+            expect(withCrumble.propSpawns[i].z).toBe(s.z)
+            expect(withCrumble.propRadii[i]).toBe(withoutCrumble.propRadii[i])
+        })
     })
 })

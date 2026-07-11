@@ -12,7 +12,7 @@ import { Box3DWorld } from './Box3DWorld'
 import { loadBox3DBridge, loadBox3DBridgeModule } from './box3dBridge'
 import { useGameStore } from '../../store/useGameStore'
 import { MarbleSim, type SimInput } from '../../systems/sim/MarbleSim'
-import { FIXED_DT } from '../../systems/sim/tuning'
+import { FIXED_DT, CRUMBLE } from '../../systems/sim/tuning'
 import { ReplayRecorder } from '../../systems/replay/recorder'
 import { ReplayPlayer } from '../../systems/replay/player'
 import { REPLAY_VERSION } from '../../systems/replay/types'
@@ -255,6 +255,125 @@ describe('Box3D Headless Physical Integration (Feel Invariants, real MarbleSim)'
         expect(sim.currentAIState).toBe('idle')
         expect(sim.playerCurr.position.y).toBeCloseTo(1.0, 3)
         expect(sim.enemyCurr.position.z).toBeCloseTo(-20, 3)
+
+        world.destroy()
+    })
+})
+
+describe('Box3D Feature C crumble/smash (real MarbleSim + WASM)', () => {
+    const CRUMBLE_OBSTACLES = { cubeCount: 0, cubeScale: 7, columnCount: 0, columnSize: 3, columnHeight: 12, crumbleCount: 1 }
+
+    function makeCrumbleSim(world: Box3DWorld, seed = 123): MarbleSim {
+        const settings = useGameStore.getState()
+        return new MarbleSim(world, {
+            enemySize: settings.enemySize,
+            enemyMass: settings.enemyMass,
+            playerSpawn: { x: 0, y: 1.0, z: 0 },
+            enemySpawn: { x: 0, y: 0.5 + settings.enemySize, z: -20 },
+            obstacles: CRUMBLE_OBSTACLES,
+            seed,
+        })
+    }
+
+    it('a fast hitter in contact smashes a crumble block into debrisPerBlock debris', async () => {
+        const world = await bootWorld()
+        const sim = makeCrumbleSim(world)
+        // Isolate the player smash: freeze the enemy so only the player can trigger it.
+        const params = { enemySpeed: 2, enemyAirControl: 0, freezeEnemy: true }
+
+        expect(sim.crumbleCount).toBe(1)
+        expect(sim.crumbleAlive[0]).toBe(true)
+        expect(sim.debrisActiveCount).toBe(0)
+
+        // Put the player on the block, moving well over the smash-speed threshold.
+        const c = sim.crumblePositions[0]
+        world.bodySetTransform(sim.playerBodyPtr, c.x, c.y, c.z, 0, 0, 0, 1)
+        world.setLinearVelocity(sim.playerBodyPtr, CRUMBLE.smashSpeed + 6, 0, 0)
+
+        sim.step(FIXED_DT, NO_INPUT, params)
+
+        expect(sim.crumbleAlive[0]).toBe(false)
+        expect(sim.debrisActiveCount).toBe(CRUMBLE.debrisPerBlock)
+
+        world.destroy()
+    })
+
+    it('a slow touch does NOT smash the block (needs real momentum)', async () => {
+        const world = await bootWorld()
+        const sim = makeCrumbleSim(world)
+        const params = { enemySpeed: 2, enemyAirControl: 0, freezeEnemy: true }
+
+        const c = sim.crumblePositions[0]
+        world.bodySetTransform(sim.playerBodyPtr, c.x, c.y, c.z, 0, 0, 0, 1)
+        world.setLinearVelocity(sim.playerBodyPtr, CRUMBLE.smashSpeed - 5, 0, 0) // below threshold
+
+        sim.step(FIXED_DT, NO_INPUT, params)
+
+        expect(sim.crumbleAlive[0]).toBe(true)
+        expect(sim.debrisActiveCount).toBe(0)
+
+        world.destroy()
+    })
+
+    it('the smash + debris are seed-deterministic (F9-safe): identical debris trajectories', async () => {
+        const params = { enemySpeed: 2, enemyAirControl: 0, freezeEnemy: true }
+
+        async function run(): Promise<number[]> {
+            const world = await bootWorld()
+            const sim = makeCrumbleSim(world, 0xc0ffee)
+            const c = sim.crumblePositions[0]
+            world.bodySetTransform(sim.playerBodyPtr, c.x, c.y, c.z, 0, 0, 0, 1)
+            world.setLinearVelocity(sim.playerBodyPtr, CRUMBLE.smashSpeed + 6, 0, 0)
+            // Smash, then let the debris fly + settle a bit.
+            for (let i = 0; i < 30; i++) sim.step(FIXED_DT, NO_INPUT, params)
+            const out: number[] = []
+            for (let i = 0; i < sim.debrisActiveCount; i++) {
+                out.push(sim.debrisCurr[i].position.x, sim.debrisCurr[i].position.y, sim.debrisCurr[i].position.z)
+            }
+            world.destroy()
+            return out
+        }
+
+        const a = await run()
+        const b = await run()
+        expect(a.length).toBeGreaterThan(0)
+        expect(b).toEqual(a) // bit-identical burst + physics
+    })
+
+    it('a dynamic box is physical: falls under gravity and settles on the floor', async () => {
+        const world = await bootWorld()
+        world.clearBodies()
+        // Floor at y=0 (top), a 0.5-half-extent box dropped from y=6.
+        world.createStaticBox(0, -0.5, 0, 50, 0.5, 50, 0.6, 0.2)
+        const box = world.createDynamicBox(0, 6, 0, 0.5, 0.5, 0.5, 1.0, 0.6, 0.2)
+        world.setDamping(box, 0.05, 0.05)
+
+        const y0 = world.readBodyTransform(box).position.y
+        for (let i = 0; i < 240; i++) world.step(FIXED_DT) // 4s
+        const yRest = world.readBodyTransform(box).position.y
+
+        expect(y0).toBeCloseTo(6, 1)                 // started high
+        expect(yRest).toBeLessThan(y0)               // fell
+        expect(yRest).toBeGreaterThan(0.3)           // rests ON the floor (~half-extent 0.5), not through it
+        expect(yRest).toBeLessThan(1.0)
+        world.destroy()
+    })
+
+    it('resetPositions reforms the block and clears all debris', async () => {
+        const world = await bootWorld()
+        const sim = makeCrumbleSim(world)
+        const params = { enemySpeed: 2, enemyAirControl: 0, freezeEnemy: true }
+
+        const c = sim.crumblePositions[0]
+        world.bodySetTransform(sim.playerBodyPtr, c.x, c.y, c.z, 0, 0, 0, 1)
+        world.setLinearVelocity(sim.playerBodyPtr, CRUMBLE.smashSpeed + 6, 0, 0)
+        sim.step(FIXED_DT, NO_INPUT, params)
+        expect(sim.crumbleAlive[0]).toBe(false)
+        expect(sim.debrisActiveCount).toBe(CRUMBLE.debrisPerBlock)
+
+        sim.resetPositions()
+        expect(sim.crumbleAlive[0]).toBe(true)
+        expect(sim.debrisActiveCount).toBe(0)
 
         world.destroy()
     })

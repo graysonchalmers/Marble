@@ -108,7 +108,7 @@ The Box3D WASM bridge (`box3dBridge.ts` → `marble_box3d_*` C funcs) exposes ex
 
 ---
 
-### 🔴 Feature C — Voxel crumble / crashable scenery  ·  *dynamic sphere (fake) or new dynamic box (real)*  ·  **DESIGNED, DEFERRED (next session)**
+### 🔴 Feature C — Voxel crumble / crashable scenery  ·  *dynamic sphere (fake) → dynamic box (real)*  ·  ✅ **BUILT (session 20): fake burst path AND real dynamic-box debris (in-cloud WASM rebuild)**
 
 **Goal (Grayson):** "take the columns and cubes and turn them into crumpled/voxel versions you can crash through and run over, and deal with the debris." Show off the physics.
 
@@ -118,13 +118,15 @@ The Box3D WASM bridge (`box3dBridge.ts` → `marble_box3d_*` C funcs) exposes ex
 
 **Debris shape (Grayson's steer): blocky/elongated, not balls.** Render debris as short **cuboid/elongated-box shards** riding sphere colliders (the columns-as-cylinders trick). In fast motion this reads as tumbling chunks; the sphere-under-box mismatch is only noticeable at rest, and debris mostly comes to rest scattered and small. Use high angular damping + stubby proportions so shards settle rather than roll forever. *(If the resting look bugs you, that's the trigger to spend the WASM budget on real dynamic boxes.)*
 
-**Open design decisions for the build session:**
-- **Trigger:** impact speed threshold vs. accumulated damage (a block takes 2–3 hits before it goes). Damage reads better but needs per-block hit state.
-- **Render churn:** removing one block mid-round from a shared `instancedMesh` (scale-to-zero that instance, and keep the occlusion arrays in sync). Debris rendered on the same per-frame instanced path as props.
-- **Determinism/replay:** trigger + debris directions must come from sim state + the seeded stream so a replay reproduces the same collapse. F9-safe by construction if we're disciplined.
-- **Perf:** cap total live debris (pool + retire oldest) so a smash-happy run doesn't spawn hundreds of bodies.
+**Open design decisions — RESOLVED in the session-20 build:**
+- **Trigger → impact-speed threshold** (not accumulated damage). A live block breaks when the player OR un-frozen enemy is in sphere-vs-AABB contact while moving faster than `CRUMBLE.smashSpeed` (9 u/s). Simplest F9-safe path (no per-block hit state); "crash through when fast" reads well. Accumulated-damage (2–3 hits) named as a future upgrade if playtest wants blocks to feel tougher.
+- **Render churn → separate instancedMesh, NOT mixed into the cubes.** Crumble is its own `instancedMesh` (unit box, per-frame matrix = position+tilt+scale, zero-scaled when `!crumbleAlive[i]`); debris is a fixed `maxLiveDebris`-size pool mesh (live slots filled from snapshots, rest zero-scaled). **This decoupled it entirely from the cube occlusion arrays** — no sync risk, so crumble blocks simply aren't occluded in v1 (scope cut, named; revisit if pillars-style occlusion is wanted).
+- **Determinism/replay → F9-safe by construction.** Smash trigger reads sim-owned position/velocity; every debris value (radius, direction, speed, spin, shard dims, spawn offset) is drawn from the seeded RNG stream; crumble scatter is drawn LAST so `crumbleCount:0` runs are byte-identical. `crumbleCount` rides the replay header so replays rebuild the same blocks. Proven by a real-WASM determinism test (same seed → bit-identical debris trajectories).
+- **Perf → lazy create + pool cap.** Debris created on smash (not pre-spawned — dormant blocks cost nothing), capped at `CRUMBLE.maxLiveDebris` (60) with retire-oldest, culled on fall-off, all cleared on round reset. New `Box3DWorld.destroyBody(ptr)` retires a single body without a full world teardown.
 
-**Verdict:** build the fake next session; escalate to real dynamic-box voxels (WASM) only if the fake's resting look isn't good enough. Both paths recorded so the decision is a playtest verdict, not a re-scoping.
+**Shape (as designed):** debris = elongated cuboid shards (seeded dims) riding sphere colliders, high angular damping so they settle stubbily — the columns-as-cylinders trick. Blocks park out of the world on smash and **reform on `resetPositions`** (each round starts intact).
+
+**Verdict (session 20):** BOTH paths shipped + verified (vitest 123/123 ×3, tsc + build clean). The fake burst path landed first; then — after proving the Box3D WASM bridge rebuilds in-cloud behavior-equivalently (see [[game-marble-wasm-cloud-build]]) — the **real dynamic-box primitive** (`marble_box3d_create_dynamic_box`) was added and debris switched to real boxes whose collider matches the shard. What was "the biggest lift in this phase, gated on a host rebuild" became a same-session in-cloud add. **Remaining escalation (optional, playtest-driven):** stacking/toppling brick-stacks (a crumble block made of many small dynamic boxes that topple as a pile) — the primitive now exists, so it's a sim/render change, no new WASM. Also unblocked by the same capability: rotated static box (→ tilted obstacle colliders match the visual) + cylinder (→ round column colliders).
 
 ---
 

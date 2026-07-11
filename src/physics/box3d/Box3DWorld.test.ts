@@ -30,6 +30,7 @@ function makeBridge() {
         worldStep: vi.fn(() => 1),
         createStaticBox: vi.fn(() => 1001),
         createDynamicSphere: vi.fn(() => 1002),
+        createDynamicBox: vi.fn(() => 1007),
         createHeightfield: vi.fn(() => 2001),
         bodyDestroy: vi.fn(),
         bodyApplyTorque: vi.fn(),

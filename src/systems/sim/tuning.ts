@@ -146,6 +146,56 @@ export const PROPS = {
 } as const
 
 /**
+ * Crumble / crashable scenery (Feature C — "fake" in-sandbox path, no WASM).
+ * A crumble block is a solid STATIC box (like a cube) until a fast-moving hitter
+ * (player or enemy) crashes into it; then the block is parked out of the world and
+ * bursts into a spray of DYNAMIC-SPHERE debris (the only dynamic primitive the bridge
+ * has) with seeded outward impulses. Debris renders as blocky/elongated shards riding
+ * the sphere colliders (the columns-as-cylinders trick) with heavy angular damping so
+ * they settle rather than roll forever. Fully deterministic: the smash trigger reads
+ * sim state and every debris value is drawn from the seeded RNG stream, so a replay
+ * reproduces the same collapse (F9-safe). Blocks reform on round reset.
+ */
+export const CRUMBLE = {
+    /** Crumble-block edge length (static box — a breakable "crate", smaller than a cube). */
+    scale: 4,
+    /** A hitter must be moving at least this fast (u/s, full 3D speed) to smash a block. */
+    smashSpeed: 9,
+    /** Extra margin on the sphere-vs-box contact test (u) so a solid hit registers. */
+    contactMargin: 0.25,
+    /** Debris chunks spawned per smashed block. */
+    debrisPerBlock: 9,
+    /** Hard cap on simultaneously-live debris bodies (retire oldest beyond this) — perf guard. */
+    maxLiveDebris: 60,
+    /** Debris base size range (seeded) — the shard's box dims derive from this; small = rubble. */
+    minDebrisRadius: 0.3,
+    maxDebrisRadius: 0.55,
+    /** Outward burst speed range for debris (seeded, u/s). */
+    burstSpeedMin: 6,
+    burstSpeedMax: 12,
+    /** Upward pop added to every debris burst so it sprays up, not just skitters out (u/s). */
+    burstUp: 5,
+    /** Seeded spin magnitude range applied to each shard (rad/s) — visual tumble. */
+    spinMin: 4,
+    spinMax: 12,
+    /** Debris physics (light + high angular damping so shards settle stubbily). */
+    density: 0.6,
+    friction: 0.6,
+    restitution: 0.2,
+    linearDamping: 0.25,
+    angularDamping: 2.5,
+    /** Y a smashed block is parked at — far below the arena, out of all play/rays. */
+    parkY: -900
+} as const
+
+/**
+ * Default crumble-block count (Phase P Feature C). Modest so the smash drama reads without
+ * flooding the arena with debris. Live-tunable via the `crumbleCount` store key
+ * (Settings → Environment). 0 = off (and keeps every crumble body out of the world).
+ */
+export const DEFAULT_CRUMBLE_COUNT = 4
+
+/**
  * Variable-floor roughness (Feature B) — default amplitude of the masked ground bumps
  * (0 = flat). Bumps are ≥~2u wavelength so the 64×64 @2u heightfield collider actually
  * resolves them; both player and enemy feel them. Live-tunable via the `terrainRoughness`

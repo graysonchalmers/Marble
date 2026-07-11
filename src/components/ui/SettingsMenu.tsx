@@ -190,6 +190,7 @@ export function SettingsMenu() {
         columnHeight, setColumnHeight,
         propCount, setPropCount,
         terrainRoughness, setTerrainRoughness,
+        crumbleCount, setCrumbleCount,
         // Camera + graphics
         cameraStiffness, setCameraStiffness,
         cameraOffset, setCameraOffset,
@@ -331,6 +332,7 @@ export function SettingsMenu() {
                         <div style={{ height: '10px' }} />
                         <Slider label="Loose Props" value={propCount} onChange={setPropCount} min={0} max={40} step={1} color={COLORS.muted} tooltip="Scattered dynamic chunks that get knocked around as you play. 0 = off." />
                         <Slider label="Floor Roughness" value={terrainRoughness} onChange={setTerrainRoughness} min={0} max={1.5} step={0.1} color={COLORS.muted} tooltip="Bumpy patches that are harder for you and the enemy to cross. 0 = smooth." />
+                        <Slider label="Crumble Blocks" value={crumbleCount} onChange={setCrumbleCount} min={0} max={20} step={1} color={COLORS.muted} tooltip="Crashable blocks that shatter into rolling debris when you (or the enemy) plow through at speed. 0 = off." />
                     </CollapsibleSection>
 
                     <CollapsibleSection

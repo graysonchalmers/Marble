@@ -36,6 +36,7 @@ $exportedFunctions = @(
     "_marble_box3d_world_step",
     "_marble_box3d_create_static_box",
     "_marble_box3d_create_dynamic_sphere",
+    "_marble_box3d_create_dynamic_box",
     "_marble_box3d_create_heightfield",
     "_marble_box3d_body_destroy",
     "_marble_box3d_body_apply_torque",

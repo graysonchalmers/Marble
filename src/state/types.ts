@@ -33,6 +33,7 @@ export interface SettingsState {
   // Physics playground (Phase P)
   propCount: number;        // scattered dynamic knock-around props (0 = off) — Feature A
   terrainRoughness: number; // variable-floor bump amplitude (0 = flat) — Feature B
+  crumbleCount: number;     // crashable crumble blocks that burst into debris (0 = off) — Feature C
 
   // Perf / Graphics
   soundEnabled: boolean;

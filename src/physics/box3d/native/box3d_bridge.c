@@ -189,6 +189,56 @@ uintptr_t marble_box3d_create_dynamic_sphere(uintptr_t worldPtr, float x, float 
     return (uintptr_t)body;
 }
 
+// Dynamic box (Phase P Feature C "real" path): a movable rigid body with a box collider —
+// combines the dynamic body def of create_dynamic_sphere with the box hull of create_static_box,
+// mass/inertia derived from the hull + density. Enables debris whose COLLIDER matches its shard
+// visual (no more sphere-under-box compromise), and is the primitive for future stacking/toppling
+// crumble + real rotated obstacle colliders. Spawns axis-aligned (identity rotation); callers give
+// it spin via set_angular_velocity. Half-extents hx/hy/hz (same convention as create_static_box).
+EMSCRIPTEN_KEEPALIVE
+uintptr_t marble_box3d_create_dynamic_box(uintptr_t worldPtr, float x, float y, float z, float hx, float hy, float hz, float density, float friction, float restitution)
+{
+    MarbleBox3DBridgeWorld* bridgeWorld = (MarbleBox3DBridgeWorld*)worldPtr;
+    if (bridgeWorld == NULL || b3World_IsValid(bridgeWorld->worldId) == false)
+    {
+        return 0;
+    }
+
+    b3BodyDef bodyDef = b3DefaultBodyDef();
+    bodyDef.type = b3_dynamicBody;
+    bodyDef.position = marble_vec3(x, y, z);
+
+    b3BodyId bodyId = b3CreateBody(bridgeWorld->worldId, &bodyDef);
+    if (b3Body_IsValid(bodyId) == false)
+    {
+        return 0;
+    }
+
+    b3BoxHull boxHull = b3MakeBoxHull(hx, hy, hz);
+    b3ShapeDef shapeDef = b3DefaultShapeDef();
+    shapeDef.density = density > 0.0f ? density : 1.0f;
+    shapeDef.baseMaterial.friction = friction;
+    shapeDef.baseMaterial.restitution = restitution;
+
+    b3ShapeId shapeId = b3CreateHullShape(bodyId, &shapeDef, &boxHull.base);
+    if (b3Shape_IsValid(shapeId) == false)
+    {
+        b3DestroyBody(bodyId);
+        return 0;
+    }
+
+    b3Body_ApplyMassFromShapes(bodyId);
+
+    MarbleBox3DBody* body = malloc(sizeof(MarbleBox3DBody));
+    if (body == NULL)
+    {
+        b3DestroyBody(bodyId);
+        return 0;
+    }
+    body->bodyId = bodyId;
+    return (uintptr_t)body;
+}
+
 EMSCRIPTEN_KEEPALIVE
 uintptr_t marble_box3d_create_heightfield(uintptr_t worldPtr, float* heights, int countX, int countZ, float scaleX, float scaleY, float scaleZ, float minHeight, float maxHeight, float friction, float restitution)
 {

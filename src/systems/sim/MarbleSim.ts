@@ -29,7 +29,7 @@ import {
     type EnemyState
 } from '../ai/EnemyAI'
 import {
-    TERRAIN, PLAYER, ENEMY, RULES, OBSTACLES, PROPS, PHYSICS_PRESETS, DEFAULT_PHYSICS_PRESET,
+    TERRAIN, PLAYER, ENEMY, RULES, OBSTACLES, PROPS, CRUMBLE, PHYSICS_PRESETS, DEFAULT_PHYSICS_PRESET,
     MOVEMENT, DEFAULT_DRIFT, DEFAULT_DOWNHILL_ROLL, FX
 } from './tuning'
 import type { PhysicsFeel } from './tuning'
@@ -101,6 +101,12 @@ export interface ObstacleConfig {
      * defaults to 0 so every existing caller/test stays byte-identical (no props unless asked).
      */
     propCount?: number
+    /**
+     * Phase P Feature C: crashable "crumble" blocks — static boxes that burst into dynamic-sphere
+     * debris when a fast hitter crashes through. Optional + defaults to 0 so existing callers/tests
+     * stay byte-identical (no crumble bodies + no extra RNG draws unless asked).
+     */
+    crumbleCount?: number
 }
 
 export interface BodySnapshot {
@@ -213,6 +219,35 @@ export class MarbleSim {
     readonly propSpawns: { x: number; y: number; z: number }[] = []
     readonly propPrev: BodySnapshot[] = []
     readonly propCurr: BodySnapshot[] = []
+
+    /**
+     * Phase P Feature C: crashable crumble blocks (static boxes that burst into debris).
+     * `crumblePositions` + `crumbleQuaternions` are the original resting transforms (render
+     * reads them); `crumbleAlive[i]` is false once block i has been smashed (render hides it).
+     * Physics-authoritative `crumbleScale` (anti-drift like cubeScale). All index-aligned.
+     */
+    readonly crumbleCount: number
+    /** Physics-authoritative crumble-block edge length — render must read this, not the store. */
+    readonly crumbleScale: number
+    private readonly crumbleBodyPtrs: number[] = []
+    readonly crumblePositions: THREE.Vector3[] = []
+    readonly crumbleQuaternions: THREE.Quaternion[] = []
+    readonly crumbleAlive: boolean[] = []
+
+    /**
+     * Live crumble debris (dynamic BOXES, created lazily on smash, retired on reset / cap /
+     * fall-off). Feature C "real" path: each debris body's box collider IS its shard visual
+     * (`debrisScales` = full dims, half of which are the collider half-extents), so collider and
+     * render match exactly. Arrays grow/shrink together; the renderer reads `debrisActiveCount`.
+     */
+    private readonly debrisBodyPtrs: number[] = []
+    readonly debrisPrev: BodySnapshot[] = []
+    readonly debrisCurr: BodySnapshot[] = []
+    readonly debrisScales: { x: number; y: number; z: number }[] = []
+    /** Max debris the renderer should allocate instances for (Feature C perf cap). */
+    readonly maxLiveDebris = CRUMBLE.maxLiveDebris
+    /** Number of currently-live debris bodies (render fills this many instance slots). */
+    get debrisActiveCount(): number { return this.debrisBodyPtrs.length }
 
     private readonly events: SimEvents
     private readonly playerSpawn: { x: number; y: number; z: number }
@@ -338,6 +373,25 @@ export class MarbleSim {
             }
         }
 
+        // --- Crashable crumble blocks (Feature C) ---
+        // Solid static boxes (like cubes) that burst into debris when crashed through. Scattered
+        // LAST from the seeded stream so runs that DON'T set crumbleCount draw nothing new here
+        // (byte-identical to before). Blocks track their body ptrs so they can be parked out of the
+        // world on smash and moved back on round reset. Debris is created lazily (on smash), not here.
+        this.crumbleScale = CRUMBLE.scale
+        this.crumbleCount = obstacles?.crumbleCount ?? 0
+        if (this.crumbleCount > 0) {
+            const half = this.crumbleScale / 2
+            for (const { x, z } of this.scatterPoints(this.crumbleCount)) {
+                const y = getTerrainHeight(x, z) + half
+                const ptr = world.createStaticBox(x, y, z, half, half, half, OBSTACLES.friction, OBSTACLES.restitution)
+                this.crumbleBodyPtrs.push(ptr)
+                this.crumblePositions.push(new THREE.Vector3(x, y, z))
+                this.crumbleQuaternions.push(MarbleSim.orientToTerrain(x, z))
+                this.crumbleAlive.push(true)
+            }
+        }
+
         this.syncSnapshots(true)
     }
 
@@ -381,7 +435,122 @@ export class MarbleSim {
             w.setAngularVelocity(this.propBodyPtrs[i], 0, 0, 0)
         }
 
+        // Feature C: reform any smashed crumble blocks (move the parked static body back to its
+        // resting transform, mark alive) and clear all debris from last round.
+        for (let i = 0; i < this.crumbleCount; i++) {
+            if (!this.crumbleAlive[i]) {
+                const p = this.crumblePositions[i]
+                w.bodySetTransform(this.crumbleBodyPtrs[i], p.x, p.y, p.z, 0, 0, 0, 1)
+                this.crumbleAlive[i] = true
+            }
+        }
+        this.clearDebris()
+
         this.syncSnapshots(true)
+    }
+
+    /** Destroy every live debris body and empty the debris arrays (round reset / teardown). */
+    private clearDebris(): void {
+        for (const ptr of this.debrisBodyPtrs) this.world.destroyBody(ptr)
+        this.debrisBodyPtrs.length = 0
+        this.debrisPrev.length = 0
+        this.debrisCurr.length = 0
+        this.debrisScales.length = 0
+    }
+
+    /** Retire the oldest live debris body (called when the live-debris cap is exceeded). */
+    private retireOldestDebris(): void {
+        const ptr = this.debrisBodyPtrs.shift()
+        if (ptr !== undefined) this.world.destroyBody(ptr)
+        this.debrisPrev.shift()
+        this.debrisCurr.shift()
+        this.debrisScales.shift()
+    }
+
+    /** True when a sphere (center + radius) overlaps a crumble block's axis-aligned box. */
+    private sphereTouchesCrumble(px: number, py: number, pz: number, radius: number, center: THREE.Vector3): boolean {
+        const half = this.crumbleScale / 2
+        const dx = Math.max(Math.abs(px - center.x) - half, 0)
+        const dy = Math.max(Math.abs(py - center.y) - half, 0)
+        const dz = Math.max(Math.abs(pz - center.z) - half, 0)
+        const reach = radius + CRUMBLE.contactMargin
+        return dx * dx + dy * dy + dz * dz <= reach * reach
+    }
+
+    /**
+     * Smash crumble block `i`: park its static collider out of the world and burst it into a
+     * seeded spray of dynamic-sphere debris at the block center. Deterministic — every debris
+     * value is drawn from the sim's seeded RNG stream, so a replay reproduces the same collapse.
+     */
+    private smashBlock(i: number): void {
+        const w = this.world
+        const c = this.crumblePositions[i]
+        // Park the static box far below the arena (out of all play + raycasts). Cheaper + more
+        // reversible than destroy/recreate: round reset moves it straight back.
+        w.bodySetTransform(this.crumbleBodyPtrs[i], c.x, CRUMBLE.parkY, c.z, 0, 0, 0, 1)
+        this.crumbleAlive[i] = false
+
+        const half = this.crumbleScale / 2
+        for (let d = 0; d < CRUMBLE.debrisPerBlock; d++) {
+            if (this.debrisBodyPtrs.length >= CRUMBLE.maxLiveDebris) this.retireOldestDebris()
+
+            const base = CRUMBLE.minDebrisRadius + this.rand() * (CRUMBLE.maxDebrisRadius - CRUMBLE.minDebrisRadius)
+            // Spawn just inside the block volume so pieces don't interpenetrate hard on frame 1.
+            const ox = (this.rand() - 0.5) * half
+            const oy = (this.rand() - 0.5) * half
+            const oz = (this.rand() - 0.5) * half
+            const sx = c.x + ox, sy = c.y + oy, sz = c.z + oz
+
+            // Elongated shard full dims (seeded). The dynamic-box collider uses these as its
+            // half-extents/2 so the COLLIDER IS the visual shard (Feature C "real" path — no more
+            // sphere-under-box). base sets the piece scale; the 1.4/0.6/1.4 ratios keep it blocky.
+            const shardX = base * (1.4 + this.rand() * 0.8)
+            const shardY = base * (0.6 + this.rand() * 0.4)
+            const shardZ = base * (1.4 + this.rand() * 0.8)
+
+            const ptr = w.createDynamicBox(sx, sy, sz, shardX / 2, shardY / 2, shardZ / 2, CRUMBLE.density, CRUMBLE.friction, CRUMBLE.restitution)
+            w.setDamping(ptr, CRUMBLE.linearDamping, CRUMBLE.angularDamping)
+
+            // Outward burst: radial direction from the block center (falls back to a seeded dir at
+            // the exact center) + an upward pop, seeded speed.
+            let dirX = ox, dirY = oy, dirZ = oz
+            const dlen = Math.hypot(dirX, dirY, dirZ)
+            if (dlen > 1e-4) { dirX /= dlen; dirY /= dlen; dirZ /= dlen }
+            else { const a = this.rand() * Math.PI * 2; dirX = Math.cos(a); dirY = 0; dirZ = Math.sin(a) }
+            const speed = CRUMBLE.burstSpeedMin + this.rand() * (CRUMBLE.burstSpeedMax - CRUMBLE.burstSpeedMin)
+            w.setLinearVelocity(ptr, dirX * speed, dirY * speed + CRUMBLE.burstUp, dirZ * speed)
+
+            // Seeded tumble.
+            const spin = CRUMBLE.spinMin + this.rand() * (CRUMBLE.spinMax - CRUMBLE.spinMin)
+            w.setAngularVelocity(ptr, (this.rand() - 0.5) * 2 * spin, (this.rand() - 0.5) * 2 * spin, (this.rand() - 0.5) * 2 * spin)
+
+            this.debrisBodyPtrs.push(ptr)
+            this.debrisScales.push({ x: shardX, y: shardY, z: shardZ })
+            this.debrisPrev.push({ position: new THREE.Vector3(sx, sy, sz), quaternion: new THREE.Quaternion() })
+            this.debrisCurr.push({ position: new THREE.Vector3(sx, sy, sz), quaternion: new THREE.Quaternion() })
+        }
+    }
+
+    /**
+     * Feature C smash detection: a live crumble block breaks when the player or (un-frozen) enemy
+     * is in contact with it while moving faster than CRUMBLE.smashSpeed. Pure over sim-owned
+     * position/velocity, so it's deterministic; runs before the physics step so the debris created
+     * here is simulated this same tick.
+     */
+    private detectSmashes(
+        px: number, py: number, pz: number, playerSpeed: number,
+        ex: number, ey: number, ez: number, enemySpeed: number,
+        freezeEnemy: boolean
+    ): void {
+        const canPlayerSmash = playerSpeed > CRUMBLE.smashSpeed
+        const canEnemySmash = !freezeEnemy && enemySpeed > CRUMBLE.smashSpeed
+        if (!canPlayerSmash && !canEnemySmash) return
+        for (let i = 0; i < this.crumbleCount; i++) {
+            if (!this.crumbleAlive[i]) continue
+            const c = this.crumblePositions[i]
+            if (canPlayerSmash && this.sphereTouchesCrumble(px, py, pz, PLAYER.radius, c)) { this.smashBlock(i); continue }
+            if (canEnemySmash && this.sphereTouchesCrumble(ex, ey, ez, this.enemySize, c)) this.smashBlock(i)
+        }
     }
 
     /**
@@ -581,6 +750,10 @@ export class MarbleSim {
             this.propPrev[i].position.copy(this.propCurr[i].position)
             this.propPrev[i].quaternion.copy(this.propCurr[i].quaternion)
         }
+        for (let i = 0; i < this.debrisBodyPtrs.length; i++) {
+            this.debrisPrev[i].position.copy(this.debrisCurr[i].position)
+            this.debrisPrev[i].quaternion.copy(this.debrisCurr[i].quaternion)
+        }
 
         // --- Read state (end of previous step) ---
         const playerTrans = w.readBodyTransform(this.playerBodyPtr)
@@ -761,6 +934,30 @@ export class MarbleSim {
                 w.setAngularVelocity(this.propBodyPtrs[i], 0, 0, 0)
             }
         }
+        // Crumble debris: retire (destroy) any that fall off the world — debris is disposable, not
+        // respawned. Backward walk so splices don't skip indices.
+        for (let i = this.debrisBodyPtrs.length - 1; i >= 0; i--) {
+            const dt2 = w.readBodyTransform(this.debrisBodyPtrs[i])
+            if (dt2.position.y < RULES.fallResetY) {
+                w.destroyBody(this.debrisBodyPtrs[i])
+                this.debrisBodyPtrs.splice(i, 1)
+                this.debrisPrev.splice(i, 1)
+                this.debrisCurr.splice(i, 1)
+                this.debrisScales.splice(i, 1)
+            }
+        }
+
+        // Feature C: detect fast crashes into crumble blocks and burst them into debris. Runs just
+        // before the physics step so new debris is simulated this tick. Deterministic (sim state).
+        if (this.crumbleCount > 0) {
+            const playerSpeed = Math.hypot(playerVel.x, playerVel.y, playerVel.z)
+            const enemySpeed = Math.hypot(enemyVel.x, enemyVel.y, enemyVel.z)
+            this.detectSmashes(
+                playerTrans.position.x, playerTrans.position.y, playerTrans.position.z, playerSpeed,
+                enemyTrans.position.x, enemyTrans.position.y, enemyTrans.position.z, enemySpeed,
+                freezeEnemy
+            )
+        }
 
         // Update FX edge-detection trackers (guard against fall-reset false positives).
         this.prevGrounded = playerReset ? false : isGrounded
@@ -819,6 +1016,16 @@ export class MarbleSim {
             if (hard) {
                 this.propPrev[i].position.copy(this.propCurr[i].position)
                 this.propPrev[i].quaternion.copy(this.propCurr[i].quaternion)
+            }
+        }
+
+        for (let i = 0; i < this.debrisBodyPtrs.length; i++) {
+            const t = this.world.readBodyTransform(this.debrisBodyPtrs[i])
+            this.debrisCurr[i].position.set(t.position.x, t.position.y, t.position.z)
+            this.debrisCurr[i].quaternion.set(t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w)
+            if (hard) {
+                this.debrisPrev[i].position.copy(this.debrisCurr[i].position)
+                this.debrisPrev[i].quaternion.copy(this.debrisCurr[i].quaternion)
             }
         }
 

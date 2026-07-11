@@ -1,0 +1,22 @@
+# Normalize all text to LF in the repo; kills the CRLF "phantom modified" churn
+# that made ~30 files show as modified in git status with no real edits.
+* text=auto eol=lf
+
+# Windows-only launchers/scripts must stay CRLF to run correctly on the host
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets — never touch line endings
+*.wasm binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.mp3 binary
+*.wav binary
+*.ogg binary
