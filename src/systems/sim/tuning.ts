@@ -194,6 +194,15 @@ export const CRUMBLE = {
     restitution: 0.2,
     linearDamping: 0.25,
     angularDamping: 2.5,
+    /**
+     * Feature D (destructible columns → brick debris). A smashed column bursts into more bricks
+     * than a crate — count scales with the pillar's height so a tall column throws a taller
+     * shower — capped so a whole column field smashed at once doesn't blow the live-debris budget
+     * instantly (the retire-oldest guard still backstops it). Bricks reuse the same seeded varied
+     * shard shapes as the crate; they spawn distributed along the full column height + footprint.
+     */
+    columnDebrisPerUnit: 4,
+    columnDebrisCap: 60,
     /** Y a smashed block is parked at — far below the arena, out of all play/rays. */
     parkY: -900
 } as const

@@ -130,7 +130,7 @@ The Box3D WASM bridge (`box3dBridge.ts` → `marble_box3d_*` C funcs) exposes ex
 
 ---
 
-### 🟣 Feature D — Destructible columns → brick debris  ·  *static box → dynamic box*  ·  ⬜ **PLANNED (session 22 — Grayson ask)**
+### 🟣 Feature D — Destructible columns → brick debris  ·  *static box → dynamic box*  ·  ✅ **BUILT (session 25)** — columns smash into height-scaled lavender brick debris; reuses the crumble machinery, no new WASM. `columnsCrumble` store key (default **on**, Grayson's "all columns") + Settings → Environment toggle. Occlusion made alive-aware so a smashed pillar vanishes + stops occluding. Gate: tsc clean · vitest 130/130 ×2 (+2 sim, +5 real-WASM) · build 2.524 MB.
 
 **Goal (Grayson):** "make all of the columns destructible as well, and they just turn into our sort of brick shapes." Completes the original Feature C vision ("take the columns AND cubes and turn them into crumpled/voxel versions you can crash through") — session 20 shipped the crashable *crate* (crumble block); this makes the **tall pillars** crashable too, so weaving through a column field and smashing a pillar into a shower of bricks becomes part of play.
 

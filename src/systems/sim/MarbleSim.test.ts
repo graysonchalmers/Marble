@@ -336,3 +336,34 @@ describe('MarbleSim crumble blocks (Phase P, Feature C)', () => {
         })
     })
 })
+
+describe('MarbleSim destructible columns (Phase P, Feature D)', () => {
+    const baseObstacles = { cubeCount: 0, cubeScale: 7, columnCount: 4, columnSize: 3, columnHeight: 12 }
+
+    it('columnsCrumble defaults to false (backward compatible) and tracks alive state per column', () => {
+        const sim = new MarbleSim(makeWorld().world, {
+            enemySize: 0.9, enemyMass: 2.5, seed: 7,
+            obstacles: baseObstacles,
+        })
+        expect(sim.columnsCrumble).toBe(false)
+        expect(sim.columnAlive).toHaveLength(4)
+        expect(sim.columnAlive.every(a => a === true)).toBe(true)
+    })
+
+    it('enabling columnsCrumble does NOT shift the column scatter (same seed → identical layout)', () => {
+        const seed = 999
+        const plain = new MarbleSim(makeWorld().world, {
+            enemySize: 0.9, enemyMass: 2.5, seed, obstacles: baseObstacles,
+        })
+        const crumbly = new MarbleSim(makeWorld().world, {
+            enemySize: 0.9, enemyMass: 2.5, seed, obstacles: { ...baseObstacles, columnsCrumble: true },
+        })
+        expect(crumbly.columnsCrumble).toBe(true)
+        expect(crumbly.columnPositions).toHaveLength(plain.columnPositions.length)
+        plain.columnPositions.forEach((p, i) => {
+            expect(crumbly.columnPositions[i].x).toBe(p.x)
+            expect(crumbly.columnPositions[i].z).toBe(p.z)
+            expect(crumbly.columnPositions[i].y).toBe(p.y)
+        })
+    })
+})

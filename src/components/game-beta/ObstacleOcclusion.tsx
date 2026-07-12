@@ -54,6 +54,13 @@ type Props = {
     mode: OcclusionMode
     /** Optional tint for the reveal fill (columns are lavender-tinted like the solid mesh). */
     color?: string
+    /**
+     * Optional per-instance alive flags (Feature D: destructible columns), index-aligned with
+     * centers. When provided, a dead (smashed) instance is hidden (zero-scaled) and excluded from
+     * occlusion — so a parked pillar vanishes and never "restores" back into view. Omit for
+     * indestructible obstacles (cubes) — behaviour is then byte-identical to before.
+     */
+    alive?: boolean[]
 }
 
 const ONE = new THREE.Vector3(1, 1, 1)
@@ -84,11 +91,14 @@ function makeGeometry(shape: ObstacleShape): THREE.BufferGeometry {
         : new THREE.CylinderGeometry(shape.radius, shape.radius, shape.height, 20)
 }
 
-export function ObstacleOcclusion({ meshRef, centers, quaternions, shape, texture, playerPosRef, mode, color }: Props) {
+export function ObstacleOcclusion({ meshRef, centers, quaternions, shape, texture, playerPosRef, mode, color, alive }: Props) {
     const { camera } = useThree()
     const [hx, hy, hz] = halfExtents(shape)
 
     const hidden = useRef<Set<number>>(new Set())
+    // Feature D: instances hidden because they're smashed (dead), tracked separately from the
+    // occlusion-hidden set so the two don't fight (a dead instance must NOT be restored by occlusion).
+    const deadHidden = useRef<Set<number>>(new Set())
     const [ghosts, setGhosts] = useState<number[]>([])
     const clock = useRef(0)
     const CHECK_INTERVAL = 0.05 // 20 Hz is plenty for this
@@ -113,6 +123,9 @@ export function ObstacleOcclusion({ meshRef, centers, quaternions, shape, textur
             mesh.instanceMatrix.needsUpdate = true
         }
         hidden.current.clear()
+        // Feature D: also drop the dead set — a fresh sim has all columns alive; the next frame
+        // re-detects and re-hides any still-smashed instance via the alive[] pass below.
+        deadHidden.current.clear()
         setGhosts([])
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [mode, centers, quaternions])
@@ -125,20 +138,22 @@ export function ObstacleOcclusion({ meshRef, centers, quaternions, shape, textur
         if (clock.current < CHECK_INTERVAL) return
         clock.current = 0
 
-        // 'off' hides nothing — the mode-change effect already restored everything.
+        // 'off' hides nothing — the mode-change effect already restored everything. A dead
+        // (smashed) instance is never a valid occluder, so filter it out of the blocking set.
         const occ = mode === 'off'
             ? []
             : findOccludingBoxes(
                 camera.position, playerPosRef.current, centers, hx, hy, hz,
                 OCCLUDE_MAX_COUNT, OCCLUDE_END_PAD, OCCLUDE_PLAYER_RADIUS,
-            )
+            ).filter(i => alive?.[i] !== false)
         const occSet = new Set(occ)
         let changed = false
 
-        // Restore obstacles that are no longer blocking.
+        // Restore obstacles that are no longer blocking (unless they're dead — those stay hidden,
+        // handled by the alive[] pass below).
         hidden.current.forEach(i => {
             if (!occSet.has(i)) {
-                restore(mesh, i)
+                if (alive?.[i] !== false) restore(mesh, i)
                 hidden.current.delete(i)
                 changed = true
             }
@@ -151,6 +166,24 @@ export function ObstacleOcclusion({ meshRef, centers, quaternions, shape, textur
                 changed = true
             }
         })
+
+        // Feature D: keep each instance's visibility in sync with alive[] independent of occlusion.
+        // A smashed column must vanish; a reformed one (round reset) returns (unless still occluded).
+        if (alive) {
+            for (let i = 0; i < centers.length; i++) {
+                if (!alive[i]) {
+                    if (!deadHidden.current.has(i)) {
+                        mesh.setMatrixAt(i, zeroMat.current)
+                        deadHidden.current.add(i)
+                        changed = true
+                    }
+                } else if (deadHidden.current.has(i)) {
+                    if (!hidden.current.has(i)) restore(mesh, i)
+                    deadHidden.current.delete(i)
+                    changed = true
+                }
+            }
+        }
         if (changed) mesh.instanceMatrix.needsUpdate = true
 
         // Only re-render the reveal list when the blocking set actually changes.

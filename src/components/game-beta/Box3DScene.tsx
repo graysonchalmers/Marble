@@ -42,6 +42,12 @@ const WIDTH = TERRAIN.width
 const DEPTH = TERRAIN.depth
 const SCALE = TERRAIN.scale
 
+// Feature C/D debris tints (the debris pool is one instancedMesh; per-instance instanceColor picks
+// which). Crate shards = rust; column bricks = lavender (matches the pillar) so rubble reads as
+// "from that thing." Material color is white so instanceColor is the sole tint.
+const DEBRIS_COLOR_CRATE = new THREE.Color('#a85a3c')
+const DEBRIS_COLOR_COLUMN = new THREE.Color('#b8b0c8')
+
 // Grid texture with a sharp minor/major line hierarchy at 2048px (legacy FallingCubes
 // look, v1 Level.tsx): thin faint minor lines + strong thick major lines, anisotropy 16
 // so lines stay crisp and don't alias away at distance. Used for BOTH the cubes and the
@@ -126,6 +132,7 @@ function buildReplayHeader(sim: MarbleSim): ReplayHeader {
             columnHeight: s.columnHeight,
             propCount: s.propCount,
             crumbleCount: s.crumbleCount,
+            columnsCrumble: s.columnsCrumble,
         },
         terrainRoughness: s.terrainRoughness,
         recordedAt: Date.now(),
@@ -549,12 +556,15 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
                     const sc = sim.debrisScales[i]
                     debrisScaleV.current.set(sc.x, sc.y, sc.z)
                     tempMat.current.compose(tempPos.current, tempQuat.current, debrisScaleV.current)
+                    // Feature D: tint per source — lavender bricks (columns) vs rust shards (crates).
+                    debrisRef.current.setColorAt(i, sim.debrisIsColumn[i] ? DEBRIS_COLOR_COLUMN : DEBRIS_COLOR_CRATE)
                 } else {
                     tempMat.current.makeScale(0, 0, 0)
                 }
                 debrisRef.current.setMatrixAt(i, tempMat.current)
             }
             debrisRef.current.instanceMatrix.needsUpdate = true
+            if (debrisRef.current.instanceColor) debrisRef.current.instanceColor.needsUpdate = true
         }
 
         // --- Camera ---
@@ -797,7 +807,9 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
                 frustumCulled={false}
             >
                 <boxGeometry args={[1, 1, 1]} />
-                <meshStandardMaterial map={cubeTexture} color="#a85a3c" roughness={0.9} metalness={0.05} />
+                {/* color=white so the per-instance instanceColor (set each frame) is the sole tint:
+                    rust for crate shards, lavender for column bricks (Feature D). */}
+                <meshStandardMaterial map={cubeTexture} color="#ffffff" roughness={0.9} metalness={0.05} />
             </instancedMesh>
 
             {/* Player Sphere Visual Mesh — reflective marble. Keeps its teal pattern (map) but the
@@ -860,6 +872,9 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
                     playerPosRef={playerRenderPosRef}
                     mode={occlusionMode}
                     color="#b8b0c8"
+                    // Feature D: when columns are destructible, feed the per-column alive state so a
+                    // smashed (parked) pillar vanishes + stops occluding instead of popping back.
+                    alive={sim.columnsCrumble ? sim.columnAlive : undefined}
                 />
             )}
 
@@ -910,6 +925,7 @@ export function Box3DScene() {
     const propCount = useGameStore(s => s.propCount)
     const terrainRoughness = useGameStore(s => s.terrainRoughness)
     const crumbleCount = useGameStore(s => s.crumbleCount)
+    const columnsCrumble = useGameStore(s => s.columnsCrumble)
 
     // Stable obstacle-scatter seed for this page session: rebuilds triggered by a settings
     // change keep the SAME layout (only the changed dimension updates) instead of reshuffling
@@ -1051,7 +1067,9 @@ export function Box3DScene() {
                     // Scattered dynamic props (Feature A) — knock-around clutter.
                     propCount: storeState.propCount,
                     // Crashable crumble blocks (Feature C) — smash into debris at speed.
-                    crumbleCount: storeState.crumbleCount
+                    crumbleCount: storeState.crumbleCount,
+                    // Destructible columns (Feature D) — smash pillars into brick debris.
+                    columnsCrumble: storeState.columnsCrumble
                 },
                 events: {
                     onTag: () => {
@@ -1124,7 +1142,7 @@ export function Box3DScene() {
         // Arena/enemy settings are baked at construction, so a change to any of them
         // rebuilds the world+sim (stable seed keeps the layout coherent across rebuilds).
         // isReplaying/replayEpoch also rebuild: entering/leaving replay, or restarting it.
-    }, [heights, physicsPreset, cubeCount, cubeScale, columnCount, columnSize, columnHeight, propCount, crumbleCount, enemySize, enemyMass, isReplaying, replayEpoch])
+    }, [heights, physicsPreset, cubeCount, cubeScale, columnCount, columnSize, columnHeight, propCount, crumbleCount, columnsCrumble, enemySize, enemyMass, isReplaying, replayEpoch])
 
     if (status.error) {
         return (

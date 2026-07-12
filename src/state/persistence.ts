@@ -2,7 +2,7 @@ import type { SettingsState } from "./types";
 import { MOVEMENT, ENEMY, DEFAULT_TERRAIN_ROUGHNESS, DEFAULT_CRUMBLE_COUNT } from "../systems/sim/tuning";
 
 const STORAGE_KEY = "MARBLE_GAME_SETTINGS_V2";
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 export const DEFAULT_SETTINGS: SettingsState = {
   jumpForce: 5,
@@ -30,6 +30,9 @@ export const DEFAULT_SETTINGS: SettingsState = {
   propCount: 24,
   terrainRoughness: DEFAULT_TERRAIN_ROUGHNESS,
   crumbleCount: DEFAULT_CRUMBLE_COUNT,
+  // Feature D: columns are destructible by default (Grayson: "make ALL the columns destructible")
+  // — smash a pillar at speed and it bursts into brick debris. Toggle in Settings → Environment.
+  columnsCrumble: true,
   soundEnabled: true,
   physicsRate: 60, // Changed default to 60 for Medium preset
   shadowsEnabled: true,
@@ -150,6 +153,8 @@ function migrate(saved: any): SettingsState {
       delete saved.columnSize;
       delete saved.columnHeight;
     }
+    // v9: added columnsCrumble (Feature D — destructible columns). No action needed — the
+    // DEFAULT_SETTINGS merge below seeds it (true) for old saves; the bump is just explicit.
   }
 
   return {

@@ -34,6 +34,7 @@ export interface SettingsState {
   propCount: number;        // scattered dynamic knock-around props (0 = off) — Feature A
   terrainRoughness: number; // variable-floor bump amplitude (0 = flat) — Feature B
   crumbleCount: number;     // crashable crumble blocks that burst into debris (0 = off) — Feature C
+  columnsCrumble: boolean;  // make the scattered columns destructible → brick debris — Feature D
 
   // Perf / Graphics
   soundEnabled: boolean;

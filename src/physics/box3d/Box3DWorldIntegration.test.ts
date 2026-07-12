@@ -378,3 +378,118 @@ describe('Box3D Feature C crumble/smash (real MarbleSim + WASM)', () => {
         world.destroy()
     })
 })
+
+describe('Box3D Feature D destructible columns (real MarbleSim + WASM)', () => {
+    const COLUMN_OBSTACLES = { cubeCount: 0, cubeScale: 7, columnCount: 1, columnSize: 3, columnHeight: 10, crumbleCount: 0, columnsCrumble: true }
+    const expectedDebris = Math.min(Math.round(COLUMN_OBSTACLES.columnHeight * CRUMBLE.columnDebrisPerUnit), CRUMBLE.columnDebrisCap)
+
+    function makeColumnSim(world: Box3DWorld, seed = 321, columnsCrumble = true): MarbleSim {
+        const settings = useGameStore.getState()
+        return new MarbleSim(world, {
+            enemySize: settings.enemySize,
+            enemyMass: settings.enemyMass,
+            playerSpawn: { x: 0, y: 1.0, z: 0 },
+            enemySpawn: { x: 0, y: 0.5 + settings.enemySize, z: -20 },
+            obstacles: { ...COLUMN_OBSTACLES, columnsCrumble },
+            seed,
+        })
+    }
+
+    it('columns are inert (no smash detection) when columnsCrumble is off', async () => {
+        const world = await bootWorld()
+        const sim = makeColumnSim(world, 321, false)
+        const params = { enemySpeed: 2, enemyAirControl: 0, freezeEnemy: true }
+
+        expect(sim.columnsCrumble).toBe(false)
+        expect(sim.columnAlive).toEqual([true])
+
+        const c = sim.columnPositions[0]
+        world.bodySetTransform(sim.playerBodyPtr, c.x, c.y, c.z, 0, 0, 0, 1)
+        world.setLinearVelocity(sim.playerBodyPtr, CRUMBLE.smashSpeed + 6, 0, 0)
+        sim.step(FIXED_DT, NO_INPUT, params)
+
+        expect(sim.columnAlive[0]).toBe(true)     // never smashes when disabled
+        expect(sim.debrisActiveCount).toBe(0)
+        world.destroy()
+    })
+
+    it('a fast hitter smashes a column into height-scaled brick debris (flagged isColumn)', async () => {
+        const world = await bootWorld()
+        const sim = makeColumnSim(world)
+        const params = { enemySpeed: 2, enemyAirControl: 0, freezeEnemy: true }
+
+        expect(sim.columnsCrumble).toBe(true)
+        expect(sim.columnAlive[0]).toBe(true)
+        expect(sim.debrisActiveCount).toBe(0)
+
+        const c = sim.columnPositions[0]
+        world.bodySetTransform(sim.playerBodyPtr, c.x, c.y, c.z, 0, 0, 0, 1)
+        world.setLinearVelocity(sim.playerBodyPtr, CRUMBLE.smashSpeed + 6, 0, 0)
+        sim.step(FIXED_DT, NO_INPUT, params)
+
+        expect(sim.columnAlive[0]).toBe(false)
+        expect(sim.debrisActiveCount).toBe(expectedDebris)
+        expect(expectedDebris).toBeGreaterThan(CRUMBLE.debrisPerBlock) // a pillar throws more than a crate
+        // Every live brick is flagged as column debris (drives the lavender tint).
+        expect(sim.debrisIsColumn.slice(0, sim.debrisActiveCount).every(v => v === true)).toBe(true)
+        world.destroy()
+    })
+
+    it('a slow touch does NOT smash the column', async () => {
+        const world = await bootWorld()
+        const sim = makeColumnSim(world)
+        const params = { enemySpeed: 2, enemyAirControl: 0, freezeEnemy: true }
+
+        const c = sim.columnPositions[0]
+        world.bodySetTransform(sim.playerBodyPtr, c.x, c.y, c.z, 0, 0, 0, 1)
+        world.setLinearVelocity(sim.playerBodyPtr, CRUMBLE.smashSpeed - 5, 0, 0) // below threshold
+        sim.step(FIXED_DT, NO_INPUT, params)
+
+        expect(sim.columnAlive[0]).toBe(true)
+        expect(sim.debrisActiveCount).toBe(0)
+        world.destroy()
+    })
+
+    it('the column smash + debris are seed-deterministic (F9-safe): identical brick trajectories', async () => {
+        const params = { enemySpeed: 2, enemyAirControl: 0, freezeEnemy: true }
+
+        async function run(): Promise<number[]> {
+            const world = await bootWorld()
+            const sim = makeColumnSim(world, 0xbead)
+            const c = sim.columnPositions[0]
+            world.bodySetTransform(sim.playerBodyPtr, c.x, c.y, c.z, 0, 0, 0, 1)
+            world.setLinearVelocity(sim.playerBodyPtr, CRUMBLE.smashSpeed + 6, 0, 0)
+            for (let i = 0; i < 30; i++) sim.step(FIXED_DT, NO_INPUT, params)
+            const out: number[] = []
+            for (let i = 0; i < sim.debrisActiveCount; i++) {
+                out.push(sim.debrisCurr[i].position.x, sim.debrisCurr[i].position.y, sim.debrisCurr[i].position.z)
+            }
+            world.destroy()
+            return out
+        }
+
+        const a = await run()
+        const b = await run()
+        expect(a.length).toBeGreaterThan(0)
+        expect(b).toEqual(a) // bit-identical burst + physics
+    })
+
+    it('resetPositions reforms the column and clears all debris', async () => {
+        const world = await bootWorld()
+        const sim = makeColumnSim(world)
+        const params = { enemySpeed: 2, enemyAirControl: 0, freezeEnemy: true }
+
+        const c = sim.columnPositions[0]
+        world.bodySetTransform(sim.playerBodyPtr, c.x, c.y, c.z, 0, 0, 0, 1)
+        world.setLinearVelocity(sim.playerBodyPtr, CRUMBLE.smashSpeed + 6, 0, 0)
+        sim.step(FIXED_DT, NO_INPUT, params)
+        expect(sim.columnAlive[0]).toBe(false)
+        expect(sim.debrisActiveCount).toBe(expectedDebris)
+
+        sim.resetPositions()
+        expect(sim.columnAlive[0]).toBe(true)
+        expect(sim.debrisActiveCount).toBe(0)
+
+        world.destroy()
+    })
+})

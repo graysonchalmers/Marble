@@ -191,6 +191,7 @@ export function SettingsMenu() {
         propCount, setPropCount,
         terrainRoughness, setTerrainRoughness,
         crumbleCount, setCrumbleCount,
+        columnsCrumble, setColumnsCrumble,
         // Camera + graphics
         cameraStiffness, setCameraStiffness,
         cameraOffset, setCameraOffset,
@@ -329,6 +330,8 @@ export function SettingsMenu() {
                         <Slider label="Column Count" value={columnCount} onChange={setColumnCount} min={0} max={40} step={1} color={COLORS.muted} />
                         <Slider label="Column Size" value={columnSize} onChange={setColumnSize} min={0.5} max={8} step={0.5} color={COLORS.muted} />
                         <Slider label="Column Height" value={columnHeight} onChange={setColumnHeight} min={2} max={30} step={1} color={COLORS.muted} />
+                        <Toggle label="Destructible Columns" value={columnsCrumble} onChange={setColumnsCrumble} />
+
                         <div style={{ height: '10px' }} />
                         <Slider label="Loose Props" value={propCount} onChange={setPropCount} min={0} max={80} step={1} color={COLORS.muted} tooltip="Scattered dynamic chunks that get knocked around as you play. 0 = off." />
                         <Slider label="Floor Roughness" value={terrainRoughness} onChange={setTerrainRoughness} min={0} max={1.5} step={0.1} color={COLORS.muted} tooltip="Bumpy patches that are harder for you and the enemy to cross. 0 = smooth." />

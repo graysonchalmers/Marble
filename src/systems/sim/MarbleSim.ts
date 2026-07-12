@@ -107,6 +107,13 @@ export interface ObstacleConfig {
      * stay byte-identical (no crumble bodies + no extra RNG draws unless asked).
      */
     crumbleCount?: number
+    /**
+     * Phase P Feature D: make the scattered columns destructible too — a fast hitter smashes a
+     * pillar into a height-distributed shower of brick debris (reuses the Feature C machinery).
+     * Optional + defaults to false so existing callers/tests stay byte-identical (no column smash
+     * detection, no extra RNG draws — columns behave as plain static obstacles unless asked).
+     */
+    columnsCrumble?: boolean
 }
 
 export interface BodySnapshot {
@@ -235,6 +242,17 @@ export class MarbleSim {
     readonly crumbleAlive: boolean[] = []
 
     /**
+     * Phase P Feature D: destructible columns. When `columnsCrumble` is set, the scattered pillars
+     * become smashable — a fast hitter parks the column body out of the world and bursts it into a
+     * height-distributed brick shower (reusing the crumble debris machinery). `columnAlive[i]` is
+     * false once column i is smashed (render hides it via ObstacleOcclusion, reforms on reset).
+     * `columnBodyPtrs` are index-aligned with columnPositions so the body can be parked/reformed.
+     */
+    readonly columnsCrumble: boolean
+    private readonly columnBodyPtrs: number[] = []
+    readonly columnAlive: boolean[] = []
+
+    /**
      * Live crumble debris (dynamic BOXES, created lazily on smash, retired on reset / cap /
      * fall-off). Feature C "real" path: each debris body's box collider IS its shard visual
      * (`debrisScales` = full dims, half of which are the collider half-extents), so collider and
@@ -244,6 +262,9 @@ export class MarbleSim {
     readonly debrisPrev: BodySnapshot[] = []
     readonly debrisCurr: BodySnapshot[] = []
     readonly debrisScales: { x: number; y: number; z: number }[] = []
+    /** Per-debris source flag (Feature D): true = brick from a smashed column (render tints it
+     *  lavender to match the pillar), false = shard from a crate. Index-aligned with debrisScales. */
+    readonly debrisIsColumn: boolean[] = []
     /** Max debris the renderer should allocate instances for (Feature C perf cap). */
     readonly maxLiveDebris = CRUMBLE.maxLiveDebris
     /** Number of currently-live debris bodies (render fills this many instance slots). */
@@ -326,14 +347,17 @@ export class MarbleSim {
                 this.cubeQuaternions.push(MarbleSim.orientToTerrain(x, z))
             }
         }
+        this.columnsCrumble = obstacles?.columnsCrumble ?? false
         if (obstacles && obstacles.columnCount > 0) {
             for (const { x, z } of this.scatterPoints(obstacles.columnCount)) {
                 const halfSize = obstacles.columnSize / 2
                 const halfHeight = obstacles.columnHeight / 2
                 const y = getTerrainHeight(x, z) + halfHeight - OBSTACLES.sink
-                world.createStaticBox(x, y, z, halfSize, halfHeight, halfSize, OBSTACLES.friction, OBSTACLES.restitution)
+                const ptr = world.createStaticBox(x, y, z, halfSize, halfHeight, halfSize, OBSTACLES.friction, OBSTACLES.restitution)
+                this.columnBodyPtrs.push(ptr)
                 this.columnPositions.push(new THREE.Vector3(x, y, z))
                 this.columnQuaternions.push(MarbleSim.orientToTerrain(x, z))
+                this.columnAlive.push(true)
             }
         }
 
@@ -445,6 +469,16 @@ export class MarbleSim {
                 this.crumbleAlive[i] = true
             }
         }
+        // Feature D: reform any smashed columns the same way.
+        if (this.columnsCrumble) {
+            for (let i = 0; i < this.columnAlive.length; i++) {
+                if (!this.columnAlive[i]) {
+                    const p = this.columnPositions[i]
+                    w.bodySetTransform(this.columnBodyPtrs[i], p.x, p.y, p.z, 0, 0, 0, 1)
+                    this.columnAlive[i] = true
+                }
+            }
+        }
         this.clearDebris()
 
         this.syncSnapshots(true)
@@ -457,6 +491,7 @@ export class MarbleSim {
         this.debrisPrev.length = 0
         this.debrisCurr.length = 0
         this.debrisScales.length = 0
+        this.debrisIsColumn.length = 0
     }
 
     /** Retire the oldest live debris body (called when the live-debris cap is exceeded). */
@@ -466,6 +501,7 @@ export class MarbleSim {
         this.debrisPrev.shift()
         this.debrisCurr.shift()
         this.debrisScales.shift()
+        this.debrisIsColumn.shift()
     }
 
     /** True when a sphere (center + radius) overlaps a crumble block's axis-aligned box. */
@@ -530,6 +566,69 @@ export class MarbleSim {
 
             this.debrisBodyPtrs.push(ptr)
             this.debrisScales.push({ x: shardX, y: shardY, z: shardZ })
+            this.debrisIsColumn.push(false)
+            this.debrisPrev.push({ position: new THREE.Vector3(sx, sy, sz), quaternion: new THREE.Quaternion() })
+            this.debrisCurr.push({ position: new THREE.Vector3(sx, sy, sz), quaternion: new THREE.Quaternion() })
+        }
+    }
+
+    /** True when a sphere overlaps a column's axis-aligned box (non-uniform: square footprint × tall). */
+    private sphereTouchesColumn(px: number, py: number, pz: number, radius: number, center: THREE.Vector3): boolean {
+        const hxz = this.columnSize / 2
+        const hy = this.columnHeight / 2
+        const dx = Math.max(Math.abs(px - center.x) - hxz, 0)
+        const dy = Math.max(Math.abs(py - center.y) - hy, 0)
+        const dz = Math.max(Math.abs(pz - center.z) - hxz, 0)
+        const reach = radius + CRUMBLE.contactMargin
+        return dx * dx + dy * dy + dz * dz <= reach * reach
+    }
+
+    /**
+     * Feature D: smash column `i` — park its static box out of the world and burst it into a
+     * height-distributed shower of brick debris. Debris count scales with the pillar height
+     * (capped) so a taller pillar throws more bricks; offsets span the full footprint (X/Z) and
+     * full height (Y) so it collapses top-to-bottom, not from a single point. Deterministic — every
+     * value drawn from the seeded RNG stream (mirrors smashBlock's draw order). Bricks carry
+     * `isColumn=true` so the renderer tints them lavender to match the pillar.
+     */
+    private smashColumn(i: number): void {
+        const w = this.world
+        const c = this.columnPositions[i]
+        w.bodySetTransform(this.columnBodyPtrs[i], c.x, CRUMBLE.parkY, c.z, 0, 0, 0, 1)
+        this.columnAlive[i] = false
+
+        const count = Math.min(Math.round(this.columnHeight * CRUMBLE.columnDebrisPerUnit), CRUMBLE.columnDebrisCap)
+        for (let d = 0; d < count; d++) {
+            if (this.debrisBodyPtrs.length >= CRUMBLE.maxLiveDebris) this.retireOldestDebris()
+
+            const base = CRUMBLE.minDebrisRadius + this.rand() * (CRUMBLE.maxDebrisRadius - CRUMBLE.minDebrisRadius)
+            const ox = (this.rand() - 0.5) * this.columnSize
+            const oy = (this.rand() - 0.5) * this.columnHeight
+            const oz = (this.rand() - 0.5) * this.columnSize
+            const sx = c.x + ox, sy = c.y + oy, sz = c.z + oz
+
+            // Same seeded varied-brick dims as the crate (session 22 shape variety) — 3 draws.
+            const shardX = base * (0.7 + this.rand() * 1.7)
+            const shardY = base * (0.5 + this.rand() * 1.3)
+            const shardZ = base * (0.7 + this.rand() * 1.7)
+
+            const ptr = w.createDynamicBox(sx, sy, sz, shardX / 2, shardY / 2, shardZ / 2, CRUMBLE.density, CRUMBLE.friction, CRUMBLE.restitution)
+            w.setDamping(ptr, CRUMBLE.linearDamping, CRUMBLE.angularDamping)
+
+            // Outward burst from the pillar center + upward pop, seeded speed.
+            let dirX = ox, dirY = oy, dirZ = oz
+            const dlen = Math.hypot(dirX, dirY, dirZ)
+            if (dlen > 1e-4) { dirX /= dlen; dirY /= dlen; dirZ /= dlen }
+            else { const a = this.rand() * Math.PI * 2; dirX = Math.cos(a); dirY = 0; dirZ = Math.sin(a) }
+            const speed = CRUMBLE.burstSpeedMin + this.rand() * (CRUMBLE.burstSpeedMax - CRUMBLE.burstSpeedMin)
+            w.setLinearVelocity(ptr, dirX * speed, dirY * speed + CRUMBLE.burstUp, dirZ * speed)
+
+            const spin = CRUMBLE.spinMin + this.rand() * (CRUMBLE.spinMax - CRUMBLE.spinMin)
+            w.setAngularVelocity(ptr, (this.rand() - 0.5) * 2 * spin, (this.rand() - 0.5) * 2 * spin, (this.rand() - 0.5) * 2 * spin)
+
+            this.debrisBodyPtrs.push(ptr)
+            this.debrisScales.push({ x: shardX, y: shardY, z: shardZ })
+            this.debrisIsColumn.push(true)
             this.debrisPrev.push({ position: new THREE.Vector3(sx, sy, sz), quaternion: new THREE.Quaternion() })
             this.debrisCurr.push({ position: new THREE.Vector3(sx, sy, sz), quaternion: new THREE.Quaternion() })
         }
@@ -539,7 +638,7 @@ export class MarbleSim {
      * Feature C smash detection: a live crumble block breaks when the player or (un-frozen) enemy
      * is in contact with it while moving faster than CRUMBLE.smashSpeed. Pure over sim-owned
      * position/velocity, so it's deterministic; runs before the physics step so the debris created
-     * here is simulated this same tick.
+     * here is simulated this same tick. Feature D extends the same test to columns when enabled.
      */
     private detectSmashes(
         px: number, py: number, pz: number, playerSpeed: number,
@@ -554,6 +653,15 @@ export class MarbleSim {
             const c = this.crumblePositions[i]
             if (canPlayerSmash && this.sphereTouchesCrumble(px, py, pz, PLAYER.radius, c)) { this.smashBlock(i); continue }
             if (canEnemySmash && this.sphereTouchesCrumble(ex, ey, ez, this.enemySize, c)) this.smashBlock(i)
+        }
+        // Feature D: same detection against the (destructible) columns.
+        if (this.columnsCrumble) {
+            for (let i = 0; i < this.columnAlive.length; i++) {
+                if (!this.columnAlive[i]) continue
+                const c = this.columnPositions[i]
+                if (canPlayerSmash && this.sphereTouchesColumn(px, py, pz, PLAYER.radius, c)) { this.smashColumn(i); continue }
+                if (canEnemySmash && this.sphereTouchesColumn(ex, ey, ez, this.enemySize, c)) this.smashColumn(i)
+            }
         }
     }
 
@@ -953,7 +1061,8 @@ export class MarbleSim {
 
         // Feature C: detect fast crashes into crumble blocks and burst them into debris. Runs just
         // before the physics step so new debris is simulated this tick. Deterministic (sim state).
-        if (this.crumbleCount > 0) {
+        // Feature D also routes column smashes through here (guard widened to cover destructible columns).
+        if (this.crumbleCount > 0 || this.columnsCrumble) {
             const playerSpeed = Math.hypot(playerVel.x, playerVel.y, playerVel.z)
             const enemySpeed = Math.hypot(enemyVel.x, enemyVel.y, enemyVel.z)
             this.detectSmashes(
