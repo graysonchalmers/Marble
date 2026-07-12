@@ -2,5 +2,6 @@ import type { PhysicsBackend } from './types'
 
 export function getRuntimePhysicsBackend(search: string): PhysicsBackend {
     const params = new URLSearchParams(search)
-    return params.get('physics') === 'box3d' ? 'box3d' : 'cannon'
+    // box3d is the shipping game; cannon is the retired legacy backend, opt-in only.
+    return params.get('physics') === 'cannon' ? 'cannon' : 'box3d'
 }
