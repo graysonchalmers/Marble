@@ -12,7 +12,7 @@ import { Box3DWorld } from './Box3DWorld'
 import { loadBox3DBridge, loadBox3DBridgeModule } from './box3dBridge'
 import { useGameStore } from '../../store/useGameStore'
 import { MarbleSim, type SimInput } from '../../systems/sim/MarbleSim'
-import { FIXED_DT, CRUMBLE } from '../../systems/sim/tuning'
+import { FIXED_DT, CRUMBLE, RULES } from '../../systems/sim/tuning'
 import { ReplayRecorder } from '../../systems/replay/recorder'
 import { ReplayPlayer } from '../../systems/replay/player'
 import { REPLAY_VERSION } from '../../systems/replay/types'
@@ -80,7 +80,7 @@ async function bootWorld(): Promise<Box3DWorld> {
     return world
 }
 
-function makeSim(world: Box3DWorld, events?: { onTag?: () => void }): MarbleSim {
+function makeSim(world: Box3DWorld, events?: { onTag?: () => void; onCaught?: () => void }): MarbleSim {
     const settings = useGameStore.getState()
     return new MarbleSim(world, {
         // No heights → flat slab environment (F1's original measurement surface)
@@ -115,6 +115,33 @@ describe('Box3D Headless Physical Integration (Feel Invariants, real MarbleSim)'
         expect(caught).toBe(true)
         expect(catchTime).toBeLessThan(maxTime)
         expect(sim.tagged).toBe(true)
+
+        world.destroy()
+    })
+
+    it('fires onCaught RULES.tagSettleFrames steps after the tag (post-tag settle/catch beat)', async () => {
+        const world = await bootWorld()
+        let tagStep = -1
+        let caughtStep = -1
+        let stepIndex = 0
+        const sim = makeSim(world, {
+            onTag: () => { if (tagStep < 0) tagStep = stepIndex },
+            onCaught: () => { if (caughtStep < 0) caughtStep = stepIndex },
+        })
+
+        const settings = useGameStore.getState()
+        const params = { enemySpeed: settings.enemySpeed, enemyAirControl: settings.enemyAirControl }
+
+        for (; stepIndex < 600 && caughtStep < 0; stepIndex++) {
+            sim.step(FIXED_DT, NO_INPUT, params)
+        }
+
+        // tag then, exactly tagSettleFrames steps later, caught — the recorded catch beat.
+        expect(tagStep).toBeGreaterThanOrEqual(0)
+        expect(sim.tagged).toBe(true)
+        expect(caughtStep).toBeGreaterThan(tagStep)
+        expect(caughtStep - tagStep).toBe(RULES.tagSettleFrames)
+        expect(sim.caught).toBe(true)
 
         world.destroy()
     })
@@ -252,6 +279,7 @@ describe('Box3D Headless Physical Integration (Feel Invariants, real MarbleSim)'
 
         sim.resetPositions()
         expect(sim.tagged).toBe(false)
+        expect(sim.caught).toBe(false)
         expect(sim.currentAIState).toBe('idle')
         expect(sim.playerCurr.position.y).toBeCloseTo(1.0, 3)
         expect(sim.enemyCurr.position.z).toBeCloseTo(-20, 3)

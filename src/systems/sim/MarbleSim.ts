@@ -79,8 +79,12 @@ export interface SimParams {
 interface Vec3Like { x: number; y: number; z: number }
 
 export interface SimEvents {
-    /** Fired once when the enemy first tags the player (edge-triggered). */
+    /** Fired once when the enemy first tags the player (edge-triggered, at contact). */
     onTag?: () => void
+    /** Fired once RULES.tagSettleFrames steps after the tag — the settle/catch beat has
+     *  played out and the round should end. The scene ends the match here (not on onTag)
+     *  so the visible catch is recorded and the replay reproduces it. */
+    onCaught?: () => void
     /** Fired on AI state transitions (for sounds + HUD). */
     onAIStateChange?: (prev: EnemyState, next: EnemyState) => void
     /** Cosmetic: player just touched down hard after a fall (impactSpeed = |downward v|). Render-only. */
@@ -187,6 +191,16 @@ export class MarbleSim {
 
     /** True once the enemy has tagged the player (cleared by resetPositions). */
     tagged = false
+
+    /** True once the post-tag settle window has elapsed — the round should now end
+     *  (cleared by resetPositions). `tagged` fires at first contact; `caught` fires
+     *  RULES.tagSettleFrames steps later, after the enemy has visibly overlapped the
+     *  player. The scene ends the match on `caught`, so live play and the recorded
+     *  replay both show the same catch beat. */
+    caught = false
+
+    /** Fixed steps counted since the tag; drives the `caught` edge. */
+    private settleCounter = 0
 
     /** Whether the player is grounded this step (render reads this for speed trails). */
     playerGrounded = false
@@ -443,6 +457,8 @@ export class MarbleSim {
         }
 
         this.tagged = false
+        this.caught = false
+        this.settleCounter = 0
         this.playerGrounded = false
         this.prevGrounded = false
         this.prevHorizSpeed = 0
@@ -1022,6 +1038,20 @@ export class MarbleSim {
         if (!freezeEnemy && !this.tagged && distToPlayer < (this.enemySize + PLAYER.radius + RULES.tagSlack)) {
             this.tagged = true
             this.events.onTag?.()
+        }
+
+        // --- Post-tag settle (edge-triggered `caught`) ---
+        // Once tagged, the enemy AI keeps homing (nothing here stops it), so it closes the
+        // tagSlack gap and overlaps the player over the next few steps. Count those steps and
+        // fire onCaught once — the scene ends the round on THAT edge, not the tag, so the
+        // visible catch is part of the recorded stream and the replay reproduces it exactly.
+        if (this.tagged && !this.caught) {
+            if (this.settleCounter >= RULES.tagSettleFrames) {
+                this.caught = true
+                this.events.onCaught?.()
+            } else {
+                this.settleCounter++
+            }
         }
 
         // --- Fall-off-world resets ---

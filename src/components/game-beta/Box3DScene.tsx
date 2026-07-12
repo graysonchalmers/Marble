@@ -1074,10 +1074,22 @@ export function Box3DScene() {
                 },
                 events: {
                     onTag: () => {
+                        // Contact: immediate audible feedback. The round does NOT end here — it
+                        // ends on onCaught (after the settle beat) so live + replay both show the
+                        // enemy actually overlapping the player. See MarbleSim post-tag settle.
                         if (fastForwardRef.current) return
                         const s = useGameStore.getState()
                         if (s.gameState === 'playing') {
                             soundManager.playBonkSound()
+                        }
+                    },
+                    onCaught: () => {
+                        // Settle window elapsed -> end the match. Same guards as onTag: muted during
+                        // seek fast-forward, and inert during replay (gameState stays 'gameover'
+                        // there, so this never re-ends a running replay).
+                        if (fastForwardRef.current) return
+                        const s = useGameStore.getState()
+                        if (s.gameState === 'playing') {
                             s.setGameState('gameover')
                         }
                     },

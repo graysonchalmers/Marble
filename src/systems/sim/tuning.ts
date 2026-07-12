@@ -92,6 +92,11 @@ export const ENEMY = {
 export const RULES = {
     /** Tag when centers are closer than enemyRadius + playerRadius + this. */
     tagSlack: 0.1,
+    /** After the tag, keep simulating this many fixed steps so the enemy visibly closes
+     *  the tagSlack gap and overlaps the player (the "catch" beat) before the round ends.
+     *  These frames are recorded, so the replay shows the identical catch instead of
+     *  freezing a beat early (~0.27s @ 60Hz). */
+    tagSettleFrames: 16,
     /** Fall-off-world reset threshold (y). */
     fallResetY: -25
 } as const
