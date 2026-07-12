@@ -573,11 +573,12 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
         const smoothFactor = 1 - Math.exp(-cameraStiffness * cameraDelta)
 
         const replayCameraMode = isReplay ? useReplayStore.getState().camera : null
-        // Free-orbit-follow now drives LIVE play too (not just replay 'free'): drei OrbitControls
-        // owns the camera (drag to orbit, scroll to zoom) and we only ease its target onto the ball
-        // each frame, so the focus/position stays locked on the ball while the player picks the
-        // angle. Replay 'chase'/'orbit' keep their old behavior below.
-        const useFreeFollow = !isReplay || replayCameraMode === 'free'
+        // Free-orbit-follow is a REPLAY tool only (replay 'free'). Session 25 briefly routed LIVE
+        // play through it too, but the orbit target only eased onto the ball (cameraDelta*8 + drei
+        // damping), so a fast ball outran it and drifted off-center ("camera disconnected from the
+        // player during gameplay", s28). Live play uses the tight chase camera (the else branch);
+        // the free orbit stays available while watching a replay.
+        const useFreeFollow = isReplay && replayCameraMode === 'free'
 
         if (useFreeFollow) {
             // OrbitControls.update() re-derives the camera position from target+spherical, so the
@@ -668,12 +669,12 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
 
     return (
         <>
-            {/* Free-orbit replay camera (default in replay): user drags to orbit + scroll to zoom,
-                target follows the player each frame (see useFrame). Mounted for LIVE play and for
-                replay 'free' — the player can orbit/zoom while the target stays locked on the ball;
-                replay 'chase'/'orbit' don't mount it, so it never fights those cameras. Panning off
-                so the ball stays centered; zoom clamped to sane bounds. */}
-            {(!isReplay || replayCamera === 'free') && (
+            {/* Free-orbit REPLAY camera (replay 'free' only): user drags to orbit + scroll to zoom,
+                target follows the player each frame (see useFrame). NOT mounted during live play —
+                live gameplay uses the tight chase camera so the ball never drifts off-center (s28
+                fix); replay 'chase'/'orbit' don't mount it either, so it never fights those cameras.
+                Panning off so the ball stays centered; zoom clamped to sane bounds. */}
+            {(isReplay && replayCamera === 'free') && (
                 <OrbitControls
                     ref={orbitControlsRef}
                     makeDefault
