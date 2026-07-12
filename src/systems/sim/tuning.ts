@@ -119,7 +119,14 @@ export const OBSTACLES = {
     /** Obstacles scatter within this fraction of the terrain's full width/depth. */
     spawnAreaFactor: 0.8,
     friction: 0.6,
-    restitution: 0.2
+    restitution: 0.2,
+    /**
+     * Depth (metres) each static obstacle (cube / column / crumble block) is sunk BELOW its
+     * flush-on-terrain resting height, so its base is buried in the ground instead of showing
+     * a floating bottom edge. Collider + visual share the same lowered Y (set in placement), so
+     * it stays coherent. Props (dynamic) are NOT sunk — they roll.
+     */
+    sink: 0.5
 } as const
 
 /* -------------------------------------------------------------------------- */
@@ -157,16 +164,19 @@ export const PROPS = {
  * reproduces the same collapse (F9-safe). Blocks reform on round reset.
  */
 export const CRUMBLE = {
-    /** Crumble-block edge length (static box — a breakable "crate", smaller than a cube). */
-    scale: 4,
+    /** Crumble-block edge length (static box — a breakable "crate"). Halved 4→2 (s24) to match
+        the shrunk cubes/columns; smash tests read this symbolically so they track it. */
+    scale: 2,
     /** A hitter must be moving at least this fast (u/s, full 3D speed) to smash a block. */
     smashSpeed: 9,
     /** Extra margin on the sphere-vs-box contact test (u) so a solid hit registers. */
     contactMargin: 0.25,
     /** Debris chunks spawned per smashed block. */
-    debrisPerBlock: 9,
-    /** Hard cap on simultaneously-live debris bodies (retire oldest beyond this) — perf guard. */
-    maxLiveDebris: 60,
+    debrisPerBlock: 24,
+    /** Hard cap on simultaneously-live debris bodies (retire oldest beyond this) — perf guard.
+     *  Sized so ~10 blocks can burst near-simultaneously (10 × debrisPerBlock) before the
+     *  retire-oldest guard kicks in, so a busy multi-block smash still shows all its shards. */
+    maxLiveDebris: 240,
     /** Debris base size range (seeded) — the shard's box dims derive from this; small = rubble. */
     minDebrisRadius: 0.3,
     maxDebrisRadius: 0.55,
@@ -189,11 +199,12 @@ export const CRUMBLE = {
 } as const
 
 /**
- * Default crumble-block count (Phase P Feature C). Modest so the smash drama reads without
- * flooding the arena with debris. Live-tunable via the `crumbleCount` store key
- * (Settings → Environment). 0 = off (and keeps every crumble body out of the world).
+ * Default crumble-block count (Phase P Feature C). Set for a lively field of crashable crates
+ * (Grayson: "lots more of them") — big enough to always have something to plow through, still
+ * clean. Live-tunable 0–40 via the `crumbleCount` store key (Settings → Environment).
+ * 0 = off (and keeps every crumble body out of the world).
  */
-export const DEFAULT_CRUMBLE_COUNT = 4
+export const DEFAULT_CRUMBLE_COUNT = 12
 
 /**
  * Variable-floor roughness (Feature B) — default amplitude of the masked ground bumps

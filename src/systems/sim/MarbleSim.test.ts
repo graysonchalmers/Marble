@@ -118,12 +118,13 @@ describe('MarbleSim static obstacle scatter', () => {
             obstacles: { cubeCount: 5, cubeScale, columnCount: 3, columnSize: 2, columnHeight }
         })
 
-        // Exact contract: y = terrainHeight(x, z) + half-height. Never buried, never floating.
+        // Exact contract: y = terrainHeight(x, z) + half-height − sink. Intentionally sunk into
+        // the ground by OBSTACLES.sink so the base is buried (s24) — coherent for collider+visual.
         for (const pos of sim.cubePositions) {
-            expect(pos.y).toBeCloseTo(getTerrainHeight(pos.x, pos.z) + cubeScale / 2, 5)
+            expect(pos.y).toBeCloseTo(getTerrainHeight(pos.x, pos.z) + cubeScale / 2 - OBSTACLES.sink, 5)
         }
         for (const pos of sim.columnPositions) {
-            expect(pos.y).toBeCloseTo(getTerrainHeight(pos.x, pos.z) + columnHeight / 2, 5)
+            expect(pos.y).toBeCloseTo(getTerrainHeight(pos.x, pos.z) + columnHeight / 2 - OBSTACLES.sink, 5)
         }
     })
 
@@ -292,7 +293,7 @@ describe('MarbleSim crumble blocks (Phase P, Feature C)', () => {
             obstacles: { ...baseObstacles, crumbleCount: 5 },
         })
         for (const p of sim.crumblePositions) {
-            expect(p.y).toBeCloseTo(getTerrainHeight(p.x, p.z) + CRUMBLE.scale / 2, 5)
+            expect(p.y).toBeCloseTo(getTerrainHeight(p.x, p.z) + CRUMBLE.scale / 2 - OBSTACLES.sink, 5)
         }
     })
 

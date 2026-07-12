@@ -130,6 +130,23 @@ The Box3D WASM bridge (`box3dBridge.ts` → `marble_box3d_*` C funcs) exposes ex
 
 ---
 
+### 🟣 Feature D — Destructible columns → brick debris  ·  *static box → dynamic box*  ·  ⬜ **PLANNED (session 22 — Grayson ask)**
+
+**Goal (Grayson):** "make all of the columns destructible as well, and they just turn into our sort of brick shapes." Completes the original Feature C vision ("take the columns AND cubes and turn them into crumpled/voxel versions you can crash through") — session 20 shipped the crashable *crate* (crumble block); this makes the **tall pillars** crashable too, so weaving through a column field and smashing a pillar into a shower of bricks becomes part of play.
+
+**Why it's cheap now.** Everything Feature C needs already exists: the smash detector (`detectSmashes`: fast hitter in sphere-vs-AABB contact over `CRUMBLE.smashSpeed`), the burst (`smashBlock` → seeded dynamic-box brick debris), the debris pool (`maxLiveDebris`, retire-oldest), reform-on-reset, F9 determinism, and the varied-brick-shape debris (session 22). Columns are already static boxes in physics (square-footprint collider) with cylinder *visuals* + camera occlusion (session 16). So Feature D is mostly **pointing the crumble machinery at the column bodies** — no new WASM, no new primitive.
+
+**Design sketch.**
+- A `columnsCrumble` toggle (store key, Environment + Dev Tools) OR just make columns always destructible (decide at build — default likely "all destructible" per Grayson's "all of the columns"). Simplest: reuse the existing column bodies as crumble targets; no separate spawn.
+- Track column bodies in the smash detector the same way crumble blocks are (`columnAlive[]`, park on smash at `CRUMBLE.parkY`, hide the cylinder instance via zero-scale like `crumbleAlive`).
+- On smash, burst into **more** debris than a crate (a 12u pillar has more mass/volume than a 4u crate) — scale `debrisPerBlock` by column volume, e.g. `round(debrisPerBlock * columnHeight / CRUMBLE.scale)` capped, so a tall pillar throws a taller column of bricks. Spawn offsets distributed along the pillar's height (not just a cube volume) so it collapses top-to-bottom-ish.
+- Debris = the same varied brick shards (session 22 shape variety already covers "vary the brick shapes"). Tint the column debris lavender (`#b8b0c8`, the column colour) vs the rust crate debris so the rubble reads as "from that pillar."
+- Determinism: column-smash trigger reads sim state; all debris values seeded; column-destructibility state rides the replay header (like `crumbleCount`). Keep `columnCount:0` / all-intact runs byte-identical by drawing any new RNG **after** the existing streams.
+
+**Scope / risks.** (a) Debris budget — tall columns × many bricks can blow past `maxLiveDebris` fast; the retire-oldest guard handles it but a big column field smashed at once may pop bricks out early (tune the per-column debris scale + cap). (b) Occlusion — a parked (smashed) column should stop being an occluder; decouple like crumble (its own state, not mixed into the occlusion arrays). (c) The cylinder visual bursting into boxes is a visual≠collider seam (house style — the collider was already a square box). **Est: ~1 session** (sim: column smash tracking + height-distributed burst; render: hide-on-smash + column-debris tint; a determinism + smash test; playtest).
+
+---
+
 ### 📌 Phase P exit gate (per feature, when pulled)
 Sim/unit tests green (scatter + roughness determinism) · full suite green · `tsc -b` + `vite build` clean · **Grayson playtest** (the feel verdict — clutter density, floor roughness amount, debris drama). Record in STATUS.md.
 

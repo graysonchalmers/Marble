@@ -537,15 +537,17 @@ canvas {
 /* UnifiedDebugMenu.tsx styles */
 .debug-menu-wrapper {
   position: absolute;
-  /* Top-anchored: the toggle stays put in the top-left and the panel drops DOWN from it,
-     bounded + scrollable. (Was bottom-anchored, so a tall panel grew UPWARD off the top
-     of the screen over the title with no scrollbar.) */
-  top: 20px;
+  /* Bottom-left anchored (Grayson): the DEV TOOLS toggle sits in the bottom-left corner and
+     the panel opens UPWARD above it via column-reverse — so the toggle never moves and the
+     content is bounded + scrollable (max-height on .debug-menu-content) instead of running off
+     the top of the screen. (The old bottom-anchor bug was column-normal growing downward off
+     the bottom; column-reverse is what makes upward-open safe.) */
+  bottom: 20px;
   left: 20px;
   z-index: var(--z-panel);
   font-family: 'JetBrains Mono', 'Consolas', monospace;
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   align-items: flex-start;
   gap: 8px;
 }

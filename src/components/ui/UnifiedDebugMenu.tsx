@@ -24,9 +24,13 @@ export function UnifiedDebugMenu() {
     const playfeelPreset = useGameStore(s => s.playfeelPreset)
     const applyPlayfeelPreset = useGameStore(s => s.applyPlayfeelPreset)
     const setSetting = useGameStore(s => s.setSetting)
+    // Clutter (Phase P) — scale or kill the loose props + crumble blocks live.
+    const propCount = useGameStore(s => s.propCount)
+    const crumbleCount = useGameStore(s => s.crumbleCount)
 
-    // Default to OPEN
-    const [isOpen, setIsOpen] = useState(true)
+    // Default to CLOSED (minimized) — the panel is bottom-left and opens upward on click,
+    // so it doesn't blanket the play area on load (Grayson: "minimize it by default").
+    const [isOpen, setIsOpen] = useState(false)
 
     // Calculate distance for display
     const distance = Math.sqrt(
@@ -371,6 +375,42 @@ export function UnifiedDebugMenu() {
 
                         <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
                             Player: Top Speed / Accel (snappiness) / Brake Decel / midair Air Control. Enemy chase top speed = Enemy Speed × Reach. All live, no rebuild.
+                        </div>
+                    </div>
+
+                    <div className="debug-divider" />
+
+                    {/* Section: Clutter (Phase P) — loose props + crumble blocks. Wide ranges so you
+                        can drastically crank or kill them; 0 = off. Rebuilds the arena on change. */}
+                    <div style={{ marginBottom: '12px' }}>
+                        <div className="debug-section-title">
+                            Clutter
+                        </div>
+
+                        {/* Loose props (dust-bunny knock-around chunks) */}
+                        <div className="debug-row" style={{ alignItems: 'center' }}>
+                            <span>Loose Props</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{propCount === 0 ? 'off' : propCount}</span>
+                        </div>
+                        <input
+                            type="range" min={0} max={80} step={1} value={propCount}
+                            onChange={(e) => setSetting('propCount', parseInt(e.target.value, 10))}
+                            style={{ width: '100%' }}
+                        />
+
+                        {/* Crumble blocks (crashable scenery that bursts into brick debris) */}
+                        <div className="debug-row" style={{ alignItems: 'center', marginTop: '6px' }}>
+                            <span>Crumble Blocks</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{crumbleCount === 0 ? 'off' : crumbleCount}</span>
+                        </div>
+                        <input
+                            type="range" min={0} max={40} step={1} value={crumbleCount}
+                            onChange={(e) => setSetting('crumbleCount', parseInt(e.target.value, 10))}
+                            style={{ width: '100%' }}
+                        />
+
+                        <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
+                            Loose Props = dust-bunny chunks you knock around. Crumble Blocks = crashable crates that shatter into brick debris. 0 = off. Changing either rebuilds the arena (resets the round).
                         </div>
                     </div>
 

@@ -10,7 +10,14 @@
 import { create } from 'zustand'
 import type { Replay } from '../systems/replay/types'
 
-export type ReplayCamera = 'chase' | 'orbit'
+/**
+ * Replay camera modes:
+ *  - 'free'  : user-dragged orbit that stays locked onto the player (default). Mouse orbits,
+ *              scroll zooms; the camera target follows the ball so it never leaves frame.
+ *  - 'chase' : classic behind-the-ball follow (the live-play camera).
+ *  - 'orbit' : hands-off cinematic auto-orbit (camera circles the player on its own).
+ */
+export type ReplayCamera = 'free' | 'chase' | 'orbit'
 
 interface ReplayStore {
     /** Most recently recorded match (set at game over). Null until a match finishes. */
@@ -20,6 +27,8 @@ interface ReplayStore {
     paused: boolean
     /** Playback speed multiplier (0.25 .. 2). */
     speed: number
+    /** Cinematic slow-mo: dilate time over the final ~1.5s into the tag. Default on. */
+    slowmo: boolean
     camera: ReplayCamera
     /** Target frame to (re)start playback from — consumed by the scene on `epoch` change. */
     seekFrame: number
@@ -36,6 +45,8 @@ interface ReplayStore {
     setPaused: (p: boolean) => void
     togglePaused: () => void
     setSpeed: (s: number) => void
+    setSlowmo: (b: boolean) => void
+    toggleSlowmo: () => void
     setCamera: (c: ReplayCamera) => void
     /** Restart playback from frame 0. */
     restart: () => void
@@ -50,7 +61,8 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     isReplaying: false,
     paused: false,
     speed: 1,
-    camera: 'chase',
+    slowmo: true,
+    camera: 'free',
     seekFrame: 0,
     epoch: 0,
     position: 0,
@@ -73,6 +85,8 @@ export const useReplayStore = create<ReplayStore>((set, get) => ({
     setPaused: (paused) => set({ paused }),
     togglePaused: () => set((s) => ({ paused: !s.paused })),
     setSpeed: (speed) => set({ speed }),
+    setSlowmo: (slowmo) => set({ slowmo }),
+    toggleSlowmo: () => set((s) => ({ slowmo: !s.slowmo })),
     setCamera: (camera) => set({ camera }),
     restart: () => set((s) => ({ seekFrame: 0, position: 0, paused: false, epoch: s.epoch + 1 })),
     seekTo: (frame) => set((s) => ({

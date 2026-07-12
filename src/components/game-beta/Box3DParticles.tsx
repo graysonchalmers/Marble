@@ -32,13 +32,21 @@ const IMPACT_COLOR: [number, number, number] = [1.0, 0.65, 0.3]  // spark
 const ENEMY_TRAIL_COLOR: [number, number, number] = [1.0, 0.28, 0.2]  // red roll-trail, matches the enemy
 const GROUND_MARK_COLOR: [number, number, number] = [1.0, 0.35, 0.12] // ember breadcrumb left on the ground
 
+// Render layer that the ball reflection CubeCameras do NOT render (they stay on the default
+// layer 0). Particles live here so the marble reflection doesn't pick up the flickering additive
+// Points. The MAIN camera enables this layer (see Box3DScene) so they're still visible normally.
+export const REFLECTION_EXCLUDE_LAYER = 2
+
 type Props = {
     sim: MarbleSim
     playerPosRef: React.MutableRefObject<THREE.Vector3>
     enemyPosRef: React.MutableRefObject<THREE.Vector3>
+    /** Sim time-scale (1 live, 0 paused, <1 during replay slow-mo). Scales particle dt so trails
+        freeze on pause and dilate in slow-mo instead of running at real time. */
+    timeScaleRef?: React.MutableRefObject<number>
 }
 
-export function Box3DParticles({ sim, playerPosRef, enemyPosRef }: Props) {
+export function Box3DParticles({ sim, playerPosRef, enemyPosRef, timeScaleRef }: Props) {
     const particles = useMemo(() => new ParticleSystem(800, 0.3), [])
     // Separate pooled system (its own single draw call) for the enemy's persistent ground
     // breadcrumb — long-lived, ground-pinned marks, tuned independently from the airborne dust.
@@ -81,8 +89,17 @@ export function Box3DParticles({ sim, playerPosRef, enemyPosRef }: Props) {
 
     useEffect(() => () => { particles.dispose(); groundTrail.dispose() }, [particles, groundTrail])
 
+    // Move both Points systems off the default layer so the ball reflection CubeCameras skip them
+    // (the main camera re-enables this layer — see Box3DScene). Kills the reflection flicker.
+    useEffect(() => {
+        particles.points.layers.set(REFLECTION_EXCLUDE_LAYER)
+        groundTrail.points.layers.set(REFLECTION_EXCLUDE_LAYER)
+    }, [particles, groundTrail])
+
     useFrame((_, delta) => {
-        const dt = Math.min(delta, 0.05)
+        // Scale by sim time so particles pause when the sim is paused and go slow-mo with it.
+        const dt = Math.min(delta, 0.05) * (timeScaleRef?.current ?? 1)
+        if (dt <= 0) return
 
         // Roll trails: rate scales with speed, only while grounded and moving.
         const speed = Math.hypot(sim.playerVel.x, sim.playerVel.z)

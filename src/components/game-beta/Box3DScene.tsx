@@ -10,10 +10,10 @@
  *  5. Handles camera/light follow, audio listener, and throttled store sync.
  */
 
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useMemo, type ComponentRef } from 'react'
 import * as THREE from 'three'
-import { Canvas, useFrame } from '@react-three/fiber'
-import { Environment, Sky } from '@react-three/drei'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { Environment, Sky, OrbitControls } from '@react-three/drei'
 import { Box3DWorld } from '../../physics/box3d/Box3DWorld'
 import { loadBox3DBridge, loadBox3DBridgeModule } from '../../physics/box3d/box3dBridge'
 import { useGameStore } from '../../store/useGameStore'
@@ -26,7 +26,8 @@ import { SIM_RATE_HZ, TERRAIN, PHYSICS_PRESETS, FIXED_DT } from '../../systems/s
 import { getStateVisuals, type EnemyState } from '../../systems/ai/EnemyAI'
 import { CubeOcclusion } from './CubeOcclusion'
 import { ObstacleOcclusion } from './ObstacleOcclusion'
-import { Box3DParticles, dispatchFx } from './Box3DParticles'
+import { Box3DParticles, dispatchFx, REFLECTION_EXCLUDE_LAYER } from './Box3DParticles'
+import { Box3DPathTrails } from './Box3DPathTrails'
 import { ReplayRecorder } from '../../systems/replay/recorder'
 import { ReplayPlayer } from '../../systems/replay/player'
 import { REPLAY_VERSION, type ReplayHeader } from '../../systems/replay/types'
@@ -41,34 +42,11 @@ const WIDTH = TERRAIN.width
 const DEPTH = TERRAIN.depth
 const SCALE = TERRAIN.scale
 
-function useGridTexture(colorBg: string, colorGrid: string, gridStep: number = 64) {
-    return useMemo(() => {
-        const RES = 512
-        const canvas = document.createElement('canvas')
-        canvas.width = RES
-        canvas.height = RES
-        const ctx = canvas.getContext('2d')
-        if (ctx) {
-            ctx.fillStyle = colorBg
-            ctx.fillRect(0, 0, RES, RES)
-            ctx.beginPath()
-            ctx.strokeStyle = colorGrid
-            ctx.lineWidth = 4
-            for (let i = 0; i <= RES; i += gridStep) {
-                ctx.moveTo(i, 0); ctx.lineTo(i, RES)
-                ctx.moveTo(0, i); ctx.lineTo(RES, i)
-            }
-            ctx.stroke()
-        }
-        const tex = new THREE.CanvasTexture(canvas)
-        tex.wrapS = THREE.RepeatWrapping
-        tex.wrapT = THREE.RepeatWrapping
-        return tex
-    }, [colorBg, colorGrid, gridStep])
-}
-
-// Higher-fidelity grid texture matching the legacy FallingCubes look (v1 Level.tsx):
-// sharp minor/major line hierarchy at 2048px so edges stay crisp at close range.
+// Grid texture with a sharp minor/major line hierarchy at 2048px (legacy FallingCubes
+// look, v1 Level.tsx): thin faint minor lines + strong thick major lines, anisotropy 16
+// so lines stay crisp and don't alias away at distance. Used for BOTH the cubes and the
+// ground now (the ground previously used a flatter single-weight 512px texture — "little
+// grids, no big lines, some vanish far away"; this unifies them).
 function useCubeGridTexture(colorBg: string, colorGrid: string, gridStep: number = 64) {
     return useMemo(() => {
         const RES = 2048
@@ -186,6 +164,8 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
     const cameraOffset = useGameStore(s => s.cameraOffset)
     // See-through obstacle reveal style (Settings → Visuals).
     const occlusionMode = useGameStore(s => s.occlusionMode)
+    // Replay camera mode (reactive) — drives whether the free-orbit controls are mounted.
+    const replayCamera = useReplayStore(s => s.camera)
 
     const [currentState, setCurrentState] = useState<EnemyState>('idle')
 
@@ -319,6 +299,10 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
 
     // Render-side smoothing state (camera only — bodies use exact interpolation)
     const smoothedCamTarget = useRef(new THREE.Vector3(0, 6, 0))
+    // Free-orbit replay camera: drei OrbitControls instance + a latch so we seed a pleasant
+    // starting offset the first frame the user enters free mode (then just follow the player).
+    const orbitControlsRef = useRef<ComponentRef<typeof OrbitControls>>(null)
+    const freeCamReady = useRef(false)
     const lightRef = useRef<THREE.DirectionalLight>(null)
     const lightTarget = useRef<THREE.Object3D>(null)
 
@@ -343,6 +327,33 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
     // Live interpolated enemy render position, shared with particles (enemy roll trail + ground breadcrumb).
     const enemyRenderPosRef = useRef(new THREE.Vector3())
 
+    // --- Live reflection probe (player ball only) ---
+    // A single CubeCamera samples the scene from the ball's position every frame, so the marble
+    // reflects the REAL arena (cubes, crumble/debris, columns, props, the enemy, terrain, sky) —
+    // not just the static environment map. 256px cube; the ball is hidden during its own pass so it
+    // doesn't reflect itself. Particles are on a separate layer the cube camera skips
+    // (REFLECTION_EXCLUDE_LAYER) so the additive Points don't make the reflection flicker. The
+    // enemy uses the cheap scene env-map (one probe is enough — Grayson's call). Feeds the ball
+    // material's envMap below; a MeshPhysicalMaterial clearcoat adds the Fresnel edge sheen.
+    const { gl, scene, camera } = useThree()
+    const REFLECT_RES = 256
+    const reflectRT = useMemo(
+        () => new THREE.WebGLCubeRenderTarget(REFLECT_RES, {
+            generateMipmaps: true,
+            minFilter: THREE.LinearMipmapLinearFilter,
+        }),
+        []
+    )
+    const reflectCam = useMemo(() => new THREE.CubeCamera(0.1, 220, reflectRT), [reflectRT])
+    useEffect(() => () => { reflectRT.dispose() }, [reflectRT])
+
+    // The main camera must still SEE the particle layer (the cube cameras won't). Enable it once.
+    useEffect(() => { camera.layers.enable(REFLECTION_EXCLUDE_LAYER) }, [camera])
+
+    // Sim time-scale shared with the particle system: 1 live, 0 when paused, <1 during replay
+    // slow-mo — so trails/bursts freeze on pause and dilate in slow-mo (set each frame below).
+    const timeScaleRef = useRef(1)
+
     // Procedural terrain mesh (visual)
     const geom = useMemo(() => {
         const geometry = new THREE.PlaneGeometry(
@@ -359,7 +370,10 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
         return geometry
     }, [heights])
 
-    const terrainTexture = useGridTexture(groundColorBg, groundColorGrid, groundGridSize)
+    // Ground now shares the cube grid generator (major/minor hierarchy + anisotropy) so the
+    // floor reads with dark thick lines + lighter minor lines like the cubes, instead of the
+    // old flat single-weight grid that aliased away at distance.
+    const terrainTexture = useCubeGridTexture(groundColorBg, groundColorGrid, groundGridSize)
     terrainTexture.repeat.set(WIDTH / 4, DEPTH / 4)
 
     // Cube obstacles: v1-matching grid texture, applied uniformly to every instance.
@@ -451,8 +465,22 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
         let advanceDelta = clampedDelta
         if (isReplay) {
             const rs = useReplayStore.getState()
-            advanceDelta = rs.paused ? 0 : clampedDelta * rs.speed
+            let spd = rs.paused ? 0 : rs.speed
+            // Cinematic slow-mo: dilate time over the final ~1.5s (90 frames @60Hz) into the
+            // tag, easing playback speed down toward 0.12× at the moment of the tag. Toggleable
+            // from the ReplayBar (rs.slowmo); the HUD "TAG IN" countdown uses the same window.
+            if (spd > 0 && rs.slowmo && rs.total > 0) {
+                const framesLeft = rs.total - rs.position
+                const RAMP = 90
+                if (framesLeft <= RAMP) {
+                    const t = Math.max(0, framesLeft / RAMP) // 1 → 0 across the ramp
+                    spd *= 0.12 + 0.88 * t
+                }
+            }
+            advanceDelta = clampedDelta * spd
         }
+        // Share the effective time-scale with the particles (0 paused, <1 slow-mo, 1 live).
+        timeScaleRef.current = clampedDelta > 0 ? advanceDelta / clampedDelta : 0
         loop.advance(advanceDelta)
         const alpha = loop.alpha
 
@@ -463,6 +491,16 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
             sphereRef.current.position.copy(tempPos.current)
             sphereRef.current.quaternion.copy(tempQuat.current)
             playerRenderPosRef.current.copy(tempPos.current)
+
+            // Live reflection: re-sample the scene from the ball this frame (hidden during its
+            // own capture so it doesn't reflect itself). Cheap 128px cube; envMap on the ball
+            // material picks it up automatically.
+            const ball = sphereRef.current
+            reflectCam.position.copy(ball.position)
+            const wasVisible = ball.visible
+            ball.visible = false
+            reflectCam.update(gl, scene)
+            ball.visible = wasVisible
         }
 
         if (enemyRef.current) {
@@ -524,7 +562,35 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
         const cameraDelta = Math.min(clampedDelta, 0.033)
         const smoothFactor = 1 - Math.exp(-cameraStiffness * cameraDelta)
 
-        if (isReplay && useReplayStore.getState().camera === 'orbit') {
+        const replayCameraMode = isReplay ? useReplayStore.getState().camera : null
+        // Free-orbit-follow now drives LIVE play too (not just replay 'free'): drei OrbitControls
+        // owns the camera (drag to orbit, scroll to zoom) and we only ease its target onto the ball
+        // each frame, so the focus/position stays locked on the ball while the player picks the
+        // angle. Replay 'chase'/'orbit' keep their old behavior below.
+        const useFreeFollow = !isReplay || replayCameraMode === 'free'
+
+        if (useFreeFollow) {
+            // OrbitControls.update() re-derives the camera position from target+spherical, so the
+            // user's chosen angle/zoom is preserved while the ball never leaves frame. Mounted
+            // whenever this branch is active (see JSX), so it never fights the other cameras.
+            const oc = orbitControlsRef.current
+            if (oc) {
+                if (!freeCamReady.current) {
+                    // First free-mode frame: seed a pleasant behind/above framing so it doesn't
+                    // snap from wherever the previous camera sat.
+                    tempOffset.current.set(0, cameraOffset * 0.5, cameraOffset)
+                    tempTargetCamPos.current.copy(playerRenderPos).add(tempOffset.current)
+                    state.camera.position.copy(tempTargetCamPos.current)
+                    oc.target.copy(playerRenderPos)
+                    freeCamReady.current = true
+                } else {
+                    // Follow: ease the orbit target onto the player (keeps user angle/zoom).
+                    oc.target.lerp(playerRenderPos, Math.min(1, cameraDelta * 8))
+                }
+                oc.update()
+            }
+        } else if (replayCameraMode === 'orbit') {
+            freeCamReady.current = false
             // Cinematic orbit: circle the player at a fixed radius/height, always looking at it.
             // Uses the render clock (not sim time) so the orbit keeps gliding even while paused.
             const t = state.clock.elapsedTime
@@ -537,6 +603,7 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
             smoothedCamTarget.current.lerp(playerRenderPos, smoothFactor * 2)
             state.camera.lookAt(smoothedCamTarget.current)
         } else {
+            freeCamReady.current = false
             // Chase follow (render-side smoothing) — stiffness + distance are live store settings.
             smoothedCamTarget.current.lerp(playerRenderPos, smoothFactor * 2)
             tempOffset.current.set(0, cameraOffset * 0.5, cameraOffset)
@@ -591,6 +658,23 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
 
     return (
         <>
+            {/* Free-orbit replay camera (default in replay): user drags to orbit + scroll to zoom,
+                target follows the player each frame (see useFrame). Mounted for LIVE play and for
+                replay 'free' — the player can orbit/zoom while the target stays locked on the ball;
+                replay 'chase'/'orbit' don't mount it, so it never fights those cameras. Panning off
+                so the ball stays centered; zoom clamped to sane bounds. */}
+            {(!isReplay || replayCamera === 'free') && (
+                <OrbitControls
+                    ref={orbitControlsRef}
+                    makeDefault
+                    enablePan={false}
+                    enableDamping
+                    dampingFactor={0.12}
+                    minDistance={4}
+                    maxDistance={80}
+                    maxPolarAngle={Math.PI * 0.495}
+                />
+            )}
             <ambientLight intensity={0.4} />
             <directionalLight
                 ref={lightRef}
@@ -716,13 +800,28 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
                 <meshStandardMaterial map={cubeTexture} color="#a85a3c" roughness={0.9} metalness={0.05} />
             </instancedMesh>
 
-            {/* Player Sphere Visual Mesh */}
+            {/* Player Sphere Visual Mesh — reflective marble. Keeps its teal pattern (map) but the
+                live CubeCamera envMap (reflectRT) makes it mirror the real arena. MeshPhysicalMaterial
+                with a clearcoat adds a Fresnel edge sheen: the coating's reflectance rises toward
+                grazing angles, so the ball reads MORE reflective around the rim (faces angled away)
+                and a touch calmer through the center — the effect Grayson asked for. More reflective
+                overall than s23 (higher metalness, lower roughness, envMapIntensity 1.35). To dial:
+                clearcoat 0..1 = strength of the rim sheen; roughness/metalness = overall mirror. */}
             <mesh ref={sphereRef} castShadow>
                 <sphereGeometry args={[0.5, 32, 16]} />
-                <meshStandardMaterial map={ballTexture} roughness={0.3} metalness={0.4} />
+                <meshPhysicalMaterial
+                    map={ballTexture}
+                    roughness={0.1}
+                    metalness={0.85}
+                    envMap={reflectRT.texture}
+                    envMapIntensity={1.35}
+                    clearcoat={1.0}
+                    clearcoatRoughness={0.12}
+                />
             </mesh>
 
-            {/* Enemy Sphere Visual Mesh */}
+            {/* Enemy Sphere Visual Mesh — reflects the cheap scene env-map (sunset preset) only;
+                no dedicated probe (back to one probe, Grayson's call). */}
             <mesh ref={enemyRef} castShadow>
                 <sphereGeometry args={[enemySize, 32, 32]} />
                 <meshStandardMaterial
@@ -764,8 +863,13 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
                 />
             )}
 
-            {/* Cosmetic particle FX: player + enemy roll trails, impact/landing bursts, enemy ground breadcrumb */}
-            <Box3DParticles sim={sim} playerPosRef={playerRenderPosRef} enemyPosRef={enemyRenderPosRef} />
+            {/* Cosmetic particle FX: player + enemy roll trails, impact/landing bursts, enemy ground
+                breadcrumb. timeScaleRef syncs them to sim time (freeze on pause, slow-mo ramp). */}
+            <Box3DParticles sim={sim} playerPosRef={playerRenderPosRef} enemyPosRef={enemyRenderPosRef} timeScaleRef={timeScaleRef} />
+
+            {/* Path trails: teal (player) + red (enemy) ground lines that slowly fade over ~14s.
+                timeScaleRef so the fade freezes on pause + slows with the replay slow-mo. */}
+            <Box3DPathTrails sim={sim} playerPosRef={playerRenderPosRef} enemyPosRef={enemyRenderPosRef} timeScaleRef={timeScaleRef} />
 
             {/* Fog background color matched to sky horizon */}
             <color attach="background" args={["#cbdbe6"]} />
@@ -835,6 +939,10 @@ export function Box3DScene() {
     if (recorderRef.current === null) recorderRef.current = new ReplayRecorder()
     // The active replay player (rebuilt each boot while replaying), handed to the scene.
     const replayPlayerRef = useRef<{ player: ReplayPlayer } | null>(null)
+    // True while boot() is synchronously fast-forwarding the sim to a seek target — mutes sim
+    // event side effects (sounds / FX / the tag→gameover transition) during the silent
+    // catch-up so scrubbing doesn't machine-gun impacts or fire a bonk on the way there.
+    const fastForwardRef = useRef(false)
 
     // Input captured into a ref — zero React re-renders on keypress.
     const keys = useRef<SimInput>({ w: false, a: false, s: false, d: false, space: false, shift: false })
@@ -858,7 +966,24 @@ export function Box3DScene() {
                 case 'shift': k.shift = down; break
             }
         }
-        const handleKeyDown = (e: KeyboardEvent) => { if (!e.repeat) set(e.key.toLowerCase(), true) }
+        const handleKeyDown = (e: KeyboardEvent) => {
+            // Spacebar must ALWAYS jump and must NEVER toggle a focused menu button. Native
+            // buttons fire their click on Space, so after clicking DEV TOOLS / a settings
+            // button the next Space would collapse the menu instead of jumping. When a button
+            // (or non-text control) holds focus, swallow the default activation and blur it so
+            // the game keeps control — jump is still registered below regardless. Text inputs
+            // are left alone so typing a space still works.
+            if (e.key === ' ') {
+                const el = document.activeElement as HTMLElement | null
+                const tag = el?.tagName
+                const isTextEntry = tag === 'INPUT' || tag === 'TEXTAREA' || !!el?.isContentEditable
+                if (!isTextEntry) {
+                    e.preventDefault()
+                    if (el && tag === 'BUTTON') el.blur()
+                }
+            }
+            if (!e.repeat) set(e.key.toLowerCase(), true)
+        }
         const handleKeyUp = (e: KeyboardEvent) => set(e.key.toLowerCase(), false)
         window.addEventListener('keydown', handleKeyDown)
         window.addEventListener('keyup', handleKeyUp)
@@ -930,6 +1055,7 @@ export function Box3DScene() {
                 },
                 events: {
                     onTag: () => {
+                        if (fastForwardRef.current) return
                         const s = useGameStore.getState()
                         if (s.gameState === 'playing') {
                             soundManager.playBonkSound()
@@ -939,25 +1065,40 @@ export function Box3DScene() {
                     onAIStateChange: (prev, next) => {
                         useGameStore.setState({ enemyAIState: next })
                         simStateListeners.get(simInstance)?.(next)
+                        if (fastForwardRef.current) return
                         if (prev === 'idle' && next === 'alert') soundManager.playAlertSound()
                         if (prev === 'chase' && next === 'search') soundManager.playLostSound()
                     },
                     onLand: (x, y, z, s) => {
+                        if (fastForwardRef.current) return
                         soundManager.playLanding(s)
                         dispatchFx(simInstance, { type: 'land', x, y, z, strength: s })
                     },
                     onImpact: (x, y, z, s) => {
+                        if (fastForwardRef.current) return
                         soundManager.playImpact(s)
                         dispatchFx(simInstance, { type: 'impact', x, y, z, strength: s })
                     }
                 }
             })
 
-            // Replay: build a fresh player over the recorded frames (seek to the requested
-            // start frame — MVP always 0). Live: no player.
+            // Replay: build a fresh player over the recorded frames, then FAST-FORWARD the sim
+            // to the requested seek frame. WASM can't rewind, so seeking = re-simulate from
+            // frame 0 up to the target by replaying its recorded inputs (events muted via
+            // fastForwardRef during the catch-up). Playback then continues live from there.
             if (header) {
                 const player = new ReplayPlayer(replaySt.lastReplay!)
-                player.seek(replaySt.seekFrame)
+                const target = Math.max(0, Math.min(replaySt.seekFrame, player.frameCount))
+                if (target > 0) {
+                    fastForwardRef.current = true
+                    for (let f = 0; f < target; f++) {
+                        const fr = player.next()
+                        if (!fr) break
+                        simInstance.step(FIXED_DT, fr.input, fr.params)
+                    }
+                    fastForwardRef.current = false
+                }
+                useReplayStore.getState().reportPosition(player.position)
                 replayPlayerRef.current = { player }
             } else {
                 replayPlayerRef.current = null

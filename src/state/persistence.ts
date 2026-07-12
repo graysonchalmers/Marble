@@ -2,7 +2,7 @@ import type { SettingsState } from "./types";
 import { MOVEMENT, ENEMY, DEFAULT_TERRAIN_ROUGHNESS, DEFAULT_CRUMBLE_COUNT } from "../systems/sim/tuning";
 
 const STORAGE_KEY = "MARBLE_GAME_SETTINGS_V2";
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 8;
 
 export const DEFAULT_SETTINGS: SettingsState = {
   jumpForce: 5,
@@ -16,15 +16,18 @@ export const DEFAULT_SETTINGS: SettingsState = {
   restitution: 0.2,
   worldScale: 0.75,
   cubeCount: 30,
-  cubeScale: 7,
+  // Halved 7→3.5 (s24, Grayson: "everything just a touch smaller, half-sized"). Colliders track
+  // this. Re-tune live in SettingsMenu → Environment; the v8 migration clears old persisted sizes.
+  cubeScale: 3.5,
   // Tall pillars (Obst-2): fewer, thinner, and taller than cubes — weave-and-dodge cover
-  // the player can't jump over (default jump clears ~1.8u). Live in SettingsMenu → Environment.
+  // the player can't jump over. Halved 3→1.5 / 12→6 (s24) to match the shrunk cubes.
   columnCount: 6,
-  columnSize: 3,
-  columnHeight: 12,
+  columnSize: 1.5,
+  columnHeight: 6,
   // Phase P — scattered dynamic props (knock-around clutter) + variable-floor roughness.
-  // Both ON at a modest default so the physics shows off; dial to 0 to disable.
-  propCount: 12,
+  // Lively by default so the physics shows off (Grayson: "lots more of those dust-bunny things");
+  // dial to 0 to disable. Dev Tools → Clutter has a wide-range live slider too.
+  propCount: 24,
   terrainRoughness: DEFAULT_TERRAIN_ROUGHNESS,
   crumbleCount: DEFAULT_CRUMBLE_COUNT,
   soundEnabled: true,
@@ -129,6 +132,24 @@ function migrate(saved: any): SettingsState {
     }
     // v6: added crumbleCount (Feature C). No action needed — the DEFAULT_SETTINGS merge below
     // seeds it for old saves; it just makes the schema bump explicit.
+    if (version < 7) {
+      // Clutter defaults were bumped for real playtest presence (crumble 4→12, props 12→24).
+      // Old saves persisted the low values, which then WIN the {...DEFAULT, ...saved} merge —
+      // so bumping the default alone did nothing for anyone who'd already played. Drop the
+      // persisted values so these two re-adopt the new lively defaults. (Grayson can re-lower
+      // via the Environment / Dev Tools sliders; those choices persist forward from v7 on.)
+      delete saved.crumbleCount;
+      delete saved.propCount;
+    }
+    if (version < 8) {
+      // Obstacle sizes were halved (cubeScale 7→3.5, columnSize 3→1.5, columnHeight 12→6) so the
+      // arena reads smaller + more sunk into the ground. Same {...DEFAULT, ...saved} gotcha as v7:
+      // drop the persisted sizes so old saves re-adopt the shrunk defaults. (Re-tune live in
+      // Environment; those choices persist forward from v8.)
+      delete saved.cubeScale;
+      delete saved.columnSize;
+      delete saved.columnHeight;
+    }
   }
 
   return {

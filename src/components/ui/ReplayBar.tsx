@@ -1,10 +1,14 @@
 /**
- * ReplayBar.tsx — playback controls for a recorded match (MVP: restart / play-pause /
- * speed / camera / progress / exit). Shown only while a replay is active. Talks to the
- * isolated replayStore; the Box3D scene consumes that state to drive playback.
+ * ReplayBar.tsx — playback controls for a recorded match: restart / play-pause /
+ * speed / slow-mo / camera / DRAGGABLE SCRUB / time-alive + countdown HUD / exit.
+ * Shown only while a replay is active. Talks to the isolated replayStore; the Box3D
+ * scene consumes that state to drive playback.
  *
- * Deferred (named, not built): drag-scrub to an arbitrary frame + WebM movie export.
+ * Scrub: dragging the timeline pauses playback and previews the frame locally; on
+ * release it commits `seekTo(frame)`, which bumps the store epoch so the scene
+ * rebuilds the sim and fast-forwards to that frame (WASM can't rewind).
  */
+import { useState } from 'react'
 import { useReplayStore } from '../../state/replayStore'
 
 const SPEEDS = [0.25, 0.5, 1, 2] as const
@@ -28,23 +32,50 @@ const btnActive: React.CSSProperties = {
     borderColor: 'rgba(36,214,162,0.7)',
 }
 
+// ~1.5s at 60 Hz — matches the scene's slow-mo ramp window so the "TAG IN" countdown
+// lights up exactly when time starts dilating.
+const RAMP_FRAMES = 90
+
 export function ReplayBar() {
     const isReplaying = useReplayStore(s => s.isReplaying)
     const paused = useReplayStore(s => s.paused)
     const speed = useReplayStore(s => s.speed)
+    const slowmo = useReplayStore(s => s.slowmo)
     const camera = useReplayStore(s => s.camera)
     const position = useReplayStore(s => s.position)
     const total = useReplayStore(s => s.total)
 
+    // Local scrub preview: non-null only while the user is dragging the timeline.
+    const [scrub, setScrub] = useState<number | null>(null)
+
     if (!isReplaying) return null
 
-    const progress = total > 0 ? Math.min(1, position / total) : 0
-    const atEnd = total > 0 && position >= total
+    // Displayed frame = the live playback head, or the drag preview while scrubbing.
+    const shownFrame = scrub ?? position
+    const atEnd = total > 0 && position >= total && scrub === null
+    const framesLeft = Math.max(0, total - shownFrame)
+
+    const aliveSec = (shownFrame / 60).toFixed(1)   // 60 Hz sim
+    const totalSec = (total / 60).toFixed(1)
+    const leftSec = (framesLeft / 60).toFixed(1)
+
     const cycleSpeed = () => {
         const i = SPEEDS.indexOf(speed as typeof SPEEDS[number])
         useReplayStore.getState().setSpeed(SPEEDS[(i + 1) % SPEEDS.length])
     }
-    const secondsAt = (frac: number) => ((total * frac) / 60).toFixed(1) // 60 Hz sim
+
+    // Drag: preview locally + pause so the head doesn't run out from under the thumb.
+    const onScrubInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const f = Number(e.target.value)
+        setScrub(f)
+        if (!useReplayStore.getState().paused) useReplayStore.getState().setPaused(true)
+    }
+    // Release: commit the seek (rebuild + fast-forward) and drop the local preview.
+    const commitScrub = () => {
+        if (scrub === null) return
+        useReplayStore.getState().seekTo(scrub)
+        setScrub(null)
+    }
 
     return (
         <div
@@ -66,9 +97,29 @@ export function ReplayBar() {
                 boxShadow: '0 8px 30px rgba(0,0,0,0.4)',
                 pointerEvents: 'auto',
                 fontFamily: "'Inter', sans-serif",
-                minWidth: 460,
+                minWidth: 480,
             }}
         >
+            {/* Time-alive + countdown-to-tag HUD */}
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+                <span style={{ color: '#fff', fontWeight: 800, fontSize: 15, fontFamily: "'JetBrains Mono', monospace" }}>
+                    ⏱ {aliveSec}s <span style={{ color: 'rgba(255,255,255,0.4)', fontWeight: 600, fontSize: 12 }}>alive</span>
+                </span>
+                {atEnd ? (
+                    <span style={{ color: '#ff5a5a', fontWeight: 900, fontSize: 15, letterSpacing: 1, fontFamily: "'JetBrains Mono', monospace" }}>
+                        🔴 TAGGED
+                    </span>
+                ) : framesLeft <= RAMP_FRAMES ? (
+                    <span style={{ color: '#ffd23f', fontWeight: 900, fontSize: 15, letterSpacing: 0.5, fontFamily: "'JetBrains Mono', monospace" }}>
+                        ⏳ TAG IN {leftSec}s
+                    </span>
+                ) : (
+                    <span style={{ color: 'rgba(255,255,255,0.45)', fontWeight: 600, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+                        survived {totalSec}s
+                    </span>
+                )}
+            </div>
+
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ color: '#24d6a2', fontWeight: 800, letterSpacing: 1, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
                     ● REPLAY
@@ -90,8 +141,23 @@ export function ReplayBar() {
 
                 <button style={btn} title="Playback speed" onClick={cycleSpeed}>{speed}×</button>
 
+                <button
+                    style={slowmo ? btnActive : btn}
+                    title="Slow-mo: dilate time over the final ~1.5s into the tag"
+                    onClick={() => useReplayStore.getState().toggleSlowmo()}
+                >
+                    🐢 Slo-mo
+                </button>
+
                 <div style={{ width: 1, height: 22, background: 'rgba(255,255,255,0.15)', margin: '0 2px' }} />
 
+                <button
+                    style={camera === 'free' ? btnActive : btn}
+                    title="Free orbit — drag to spin around the ball, scroll to zoom (always follows the player)"
+                    onClick={() => useReplayStore.getState().setCamera('free')}
+                >
+                    Free
+                </button>
                 <button
                     style={camera === 'chase' ? btnActive : btn}
                     onClick={() => useReplayStore.getState().setCamera('chase')}
@@ -116,16 +182,30 @@ export function ReplayBar() {
                 </button>
             </div>
 
-            {/* Progress (read-only for MVP; drag-scrub is deferred) */}
+            {/* Draggable scrub timeline. Dragging pauses + previews; release seeks. */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, fontFamily: "'JetBrains Mono', monospace", minWidth: 34, textAlign: 'right' }}>
-                    {secondsAt(progress)}s
+                <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 11, fontFamily: "'JetBrains Mono', monospace", minWidth: 38, textAlign: 'right' }}>
+                    {aliveSec}s
                 </span>
-                <div style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.12)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ width: `${progress * 100}%`, height: '100%', background: '#24d6a2', transition: 'width 0.05s linear' }} />
-                </div>
-                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, fontFamily: "'JetBrains Mono', monospace", minWidth: 34 }}>
-                    {secondsAt(1)}s
+                <input
+                    type="range"
+                    min={0}
+                    max={Math.max(1, total)}
+                    step={1}
+                    value={shownFrame}
+                    onChange={onScrubInput}
+                    onMouseUp={commitScrub}
+                    onTouchEnd={commitScrub}
+                    title="Drag to scrub — release to jump to that moment"
+                    style={{
+                        flex: 1,
+                        height: 6,
+                        cursor: 'pointer',
+                        accentColor: '#24d6a2',
+                    }}
+                />
+                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 11, fontFamily: "'JetBrains Mono', monospace", minWidth: 38 }}>
+                    {totalSec}s
                 </span>
             </div>
         </div>

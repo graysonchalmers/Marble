@@ -319,7 +319,8 @@ export class MarbleSim {
         if (obstacles && obstacles.cubeCount > 0) {
             for (const { x, z } of this.scatterPoints(obstacles.cubeCount)) {
                 const half = obstacles.cubeScale / 2
-                const y = getTerrainHeight(x, z) + half
+                // Sink into the ground (OBSTACLES.sink) so the base is buried, no floating bottom.
+                const y = getTerrainHeight(x, z) + half - OBSTACLES.sink
                 world.createStaticBox(x, y, z, half, half, half, OBSTACLES.friction, OBSTACLES.restitution)
                 this.cubePositions.push(new THREE.Vector3(x, y, z))
                 this.cubeQuaternions.push(MarbleSim.orientToTerrain(x, z))
@@ -329,7 +330,7 @@ export class MarbleSim {
             for (const { x, z } of this.scatterPoints(obstacles.columnCount)) {
                 const halfSize = obstacles.columnSize / 2
                 const halfHeight = obstacles.columnHeight / 2
-                const y = getTerrainHeight(x, z) + halfHeight
+                const y = getTerrainHeight(x, z) + halfHeight - OBSTACLES.sink
                 world.createStaticBox(x, y, z, halfSize, halfHeight, halfSize, OBSTACLES.friction, OBSTACLES.restitution)
                 this.columnPositions.push(new THREE.Vector3(x, y, z))
                 this.columnQuaternions.push(MarbleSim.orientToTerrain(x, z))
@@ -383,7 +384,7 @@ export class MarbleSim {
         if (this.crumbleCount > 0) {
             const half = this.crumbleScale / 2
             for (const { x, z } of this.scatterPoints(this.crumbleCount)) {
-                const y = getTerrainHeight(x, z) + half
+                const y = getTerrainHeight(x, z) + half - OBSTACLES.sink
                 const ptr = world.createStaticBox(x, y, z, half, half, half, OBSTACLES.friction, OBSTACLES.restitution)
                 this.crumbleBodyPtrs.push(ptr)
                 this.crumblePositions.push(new THREE.Vector3(x, y, z))
@@ -501,12 +502,15 @@ export class MarbleSim {
             const oz = (this.rand() - 0.5) * half
             const sx = c.x + ox, sy = c.y + oy, sz = c.z + oz
 
-            // Elongated shard full dims (seeded). The dynamic-box collider uses these as its
+            // Brick shard full dims (seeded). The dynamic-box collider uses these as its
             // half-extents/2 so the COLLIDER IS the visual shard (Feature C "real" path — no more
-            // sphere-under-box). base sets the piece scale; the 1.4/0.6/1.4 ratios keep it blocky.
-            const shardX = base * (1.4 + this.rand() * 0.8)
-            const shardY = base * (0.6 + this.rand() * 0.4)
-            const shardZ = base * (1.4 + this.rand() * 0.8)
+            // sphere-under-box). base sets the piece scale; the three axes are drawn from WIDE,
+            // independent ranges so debris reads as MIXED rubble — some near-cubic bricks, some
+            // flat slabs, some long shards — instead of uniform flat cuboids (Grayson: "vary the
+            // brick shapes … feels more natural"). Still 3 seeded draws, so determinism holds.
+            const shardX = base * (0.7 + this.rand() * 1.7)  // 0.7–2.4
+            const shardY = base * (0.5 + this.rand() * 1.3)  // 0.5–1.8
+            const shardZ = base * (0.7 + this.rand() * 1.7)  // 0.7–2.4
 
             const ptr = w.createDynamicBox(sx, sy, sz, shardX / 2, shardY / 2, shardZ / 2, CRUMBLE.density, CRUMBLE.friction, CRUMBLE.restitution)
             w.setDamping(ptr, CRUMBLE.linearDamping, CRUMBLE.angularDamping)
