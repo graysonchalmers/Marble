@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
-import { Scene } from './components/game/Scene'
 import { useGameStore } from './store/useGameStore'
 import { SettingsMenu } from './components/ui/SettingsMenu'
 import { UnifiedDebugMenu } from './components/ui/UnifiedDebugMenu'
@@ -10,7 +9,6 @@ import { VersionOverlay } from './components/ui/VersionOverlay'
 import { ReplayBar } from './components/ui/ReplayBar'
 import { useReplayStore } from './state/replayStore'
 import { Box3DScene } from './components/game-beta/Box3DScene'
-import { getRuntimePhysicsBackend } from './physics/runtime'
 
 function GameUI() {
   const {
@@ -149,11 +147,10 @@ function App() {
 
 function AppInner() {
   const { playerPosition, enemyPosition, uiAccentColor } = useGameStore()
-  const physicsBackend = getRuntimePhysicsBackend(window.location.search)
 
   return (
     <>
-      {physicsBackend === 'box3d' ? <Box3DScene /> : <Scene />}
+      <Box3DScene />
       <GameUI />
       <ReplayBar />
       <SettingsMenu />

@@ -1,4 +1,4 @@
-export type PhysicsBackend = 'cannon' | 'box3d'
+export type PhysicsBackend = 'box3d'
 
 export interface PhysicsVector3 {
     x: number
