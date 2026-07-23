@@ -90,8 +90,15 @@ export const ENEMY = {
 } as const
 
 export const RULES = {
-    /** Tag when centers are closer than enemyRadius + playerRadius + this. */
-    tagSlack: 0.1,
+    /** Tag when closest approach of the two ball centres over the step is under
+     *  enemyRadius + playerRadius + this. Widened from 0.1 → 0.25 (s33) to cover the
+     *  visual-radius margin so a graze that visibly overlaps actually registers. */
+    tagSlack: 0.25,
+    /** Swept-tag teleport guard: if either ball moved more than this in one fixed step
+     *  (u), it teleported (fall-off reset / resetPositions), NOT real motion — fall back
+     *  to the endpoint distance so the sweep can't cut across the arena and false-tag.
+     *  Normal top speeds are well under 1u/step @ 60Hz, so 5u cleanly separates them. */
+    tagMaxSweep: 5,
     /** After the tag, keep simulating this many fixed steps so the enemy visibly closes
      *  the tagSlack gap and overlaps the player (the "catch" beat) before the round ends.
      *  These frames are recorded, so the replay shows the identical catch instead of

@@ -36,6 +36,7 @@ import type { PhysicsFeel } from './tuning'
 import { getTerrainHeight, getTerrainNormal } from '../../utils/terrain'
 import { mulberry32, DEFAULT_SIM_SEED } from './rng'
 import { computeEjection } from './unstick'
+import { sweptMinDistance } from './sweptTag'
 
 /** World up — obstacles tilt from this toward the local terrain normal. */
 const WORLD_UP = new THREE.Vector3(0, 1, 0)
@@ -192,6 +193,11 @@ export class MarbleSim {
     /** Ref-shaped live positions (SonarSystem consumes `{ current: Vector3 }`). */
     readonly playerPosRef = { current: new THREE.Vector3() }
     readonly enemyPosRef = { current: new THREE.Vector3() }
+    // Previous-step ball centres, for the swept (closest-approach) tag test. Updated
+    // once per step after the tag check; re-seeded to spawn on reset so a teleport
+    // (resetPositions / fall-off) can't leave a stale point the sweep would cross.
+    private readonly prevPlayerPos = new THREE.Vector3()
+    private readonly prevEnemyPos = new THREE.Vector3()
     readonly playerVel = new THREE.Vector3()
 
     readonly aiState: EnemyAIState = createAIState()
@@ -359,6 +365,10 @@ export class MarbleSim {
         this.events = config.events ?? {}
         this.playerSpawn = config.playerSpawn ?? { ...PLAYER.spawn }
         this.enemySpawn = config.enemySpawn ?? { ...ENEMY.spawn }
+        // Seed the swept-tag history to spawn up front, so the very first step sweeps
+        // from a real position (balls ~20u apart), not from the origin.
+        this.prevPlayerPos.set(this.playerSpawn.x, this.playerSpawn.y, this.playerSpawn.z)
+        this.prevEnemyPos.set(this.enemySpawn.x, this.enemySpawn.y, this.enemySpawn.z)
 
         // Remove smoke-test bodies left by Box3DWorld.reset() — previously these
         // survived as invisible colliders under the terrain (stray 4x0.5x4 floor
@@ -553,6 +563,10 @@ export class MarbleSim {
         this.tagged = false
         this.caught = false
         this.settleCounter = 0
+        // Re-seed the swept-tag history to spawn so the first post-reset step sweeps
+        // from spawn (balls ~20u apart), never from a pre-reset adjacent position.
+        this.prevPlayerPos.set(this.playerSpawn.x, this.playerSpawn.y, this.playerSpawn.z)
+        this.prevEnemyPos.set(this.enemySpawn.x, this.enemySpawn.y, this.enemySpawn.z)
         this.playerGrounded = false
         this.prevGrounded = false
         this.prevHorizSpeed = 0
@@ -1145,11 +1159,31 @@ export class MarbleSim {
         }
 
         // --- Tag detection (edge-triggered; skipped while the enemy is frozen) ---
-        const distToPlayer = this.enemyPosRef.current.distanceTo(this.playerPosRef.current)
-        if (!freezeEnemy && !this.tagged && distToPlayer < (this.enemySize + PLAYER.radius + RULES.tagSlack)) {
+        // Use the SWEPT closest approach over the step (not just the endpoint distance)
+        // so a fast graze that crosses the overlap zone between samples still registers.
+        // Guard: if either ball teleported this step (fall-off reset / resetPositions),
+        // its displacement blows past tagMaxSweep — fall back to the endpoint distance so
+        // the sweep can't cut across the arena and false-tag. Pure/deterministic → F9-safe.
+        const cur = this.playerPosRef.current
+        const ecur = this.enemyPosRef.current
+        const pdx = cur.x - this.prevPlayerPos.x, pdy = cur.y - this.prevPlayerPos.y, pdz = cur.z - this.prevPlayerPos.z
+        const edx = ecur.x - this.prevEnemyPos.x, edy = ecur.y - this.prevEnemyPos.y, edz = ecur.z - this.prevEnemyPos.z
+        const cap2 = RULES.tagMaxSweep * RULES.tagMaxSweep
+        const teleported = (pdx * pdx + pdy * pdy + pdz * pdz) > cap2 || (edx * edx + edy * edy + edz * edz) > cap2
+        const tagDist = teleported
+            ? ecur.distanceTo(cur)
+            : sweptMinDistance(
+                this.prevPlayerPos.x, this.prevPlayerPos.y, this.prevPlayerPos.z, cur.x, cur.y, cur.z,
+                this.prevEnemyPos.x, this.prevEnemyPos.y, this.prevEnemyPos.z, ecur.x, ecur.y, ecur.z,
+            )
+        if (!freezeEnemy && !this.tagged && tagDist < (this.enemySize + PLAYER.radius + RULES.tagSlack)) {
             this.tagged = true
             this.events.onTag?.()
         }
+        // Advance the swept-tag history for next step (every step, incl. frozen/countdown,
+        // so the first live step sweeps from a coherent previous position).
+        this.prevPlayerPos.copy(cur)
+        this.prevEnemyPos.copy(ecur)
 
         // --- Post-tag settle (edge-triggered `caught`) ---
         // Once tagged, the enemy AI keeps homing (nothing here stops it), so it closes the
