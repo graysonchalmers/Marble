@@ -29,7 +29,7 @@ import {
     type EnemyState
 } from '../ai/EnemyAI'
 import {
-    TERRAIN, PLAYER, ENEMY, RULES, OBSTACLES, PROPS, CRUMBLE, PHYSICS_PRESETS, DEFAULT_PHYSICS_PRESET,
+    TERRAIN, PLAYER, ENEMY, RULES, OBSTACLES, PROPS, CRUMBLE, RAMP, PHYSICS_PRESETS, DEFAULT_PHYSICS_PRESET,
     MOVEMENT, DEFAULT_DRIFT, DEFAULT_DOWNHILL_ROLL, FX
 } from './tuning'
 import type { PhysicsFeel } from './tuning'
@@ -118,6 +118,14 @@ export interface ObstacleConfig {
      * detection, no extra RNG draws — columns behave as plain static obstacles unless asked).
      */
     columnsCrumble?: boolean
+    /**
+     * Phase P Feature E: fraction (0..1) of the scattered CUBES converted into launch ramps —
+     * stepped static-box wedges you drive up and catch air off. Optional + defaults to 0 so
+     * existing callers/tests stay byte-identical: ramp decisions draw from the seeded stream
+     * LAST (after every other scatter), so a 0/absent ratio makes ZERO extra RNG draws. Facing
+     * is cardinal (4-way) so the stepped collider stays axis-aligned — no rotated-box primitive.
+     */
+    rampCubeRatio?: number
 }
 
 export interface BodySnapshot {
@@ -187,6 +195,27 @@ export class MarbleSim {
     readonly playerVel = new THREE.Vector3()
 
     readonly aiState: EnemyAIState = createAIState()
+
+    /**
+     * Debug / Dev-Tools — AI legibility snapshot. A render-only mirror of the enemy's "mind",
+     * refreshed each AI decision tick (10Hz). NEVER read by sim logic → zero determinism impact
+     * (F9-safe), draws no RNG, adds no bodies. The AIDebugOverlay component reads this to draw the
+     * vision range, line-of-sight ray (green=sees / red=blocked), hunt-state, last-known position,
+     * search waypoints, and the obstacle-avoidance probe.
+     */
+    readonly enemyDebug = {
+        active: false,
+        state: 'idle' as EnemyState,
+        canSee: false,
+        visionDistance: ENEMY.visionDistance,
+        lastKnown: new THREE.Vector3(),
+        target: new THREE.Vector3(),
+        waypoints: [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()],
+        waypointIndex: 0,
+        avoidActive: false,
+        probeDir: new THREE.Vector3(),
+        probeLen: 0,
+    }
     currentAIState: EnemyState = 'idle'
 
     /** True once the enemy has tagged the player (cleared by resetPositions). */
@@ -217,6 +246,23 @@ export class MarbleSim {
     /** World-space centers of static obstacles, for the scene to render (never move post-spawn). */
     readonly cubePositions: THREE.Vector3[] = []
     readonly columnPositions: THREE.Vector3[] = []
+
+    /**
+     * Phase P Feature E — launch pyramids. A seeded subset of CUBES is converted (in a final scatter
+     * pass) into 4-sided stepped pyramids: the plain cube box is destroyed and replaced by a stack of
+     * concentric shrinking axis-aligned boxes (a ziggurat), symmetric on all four sides so the marble
+     * can roll up + launch off ANY direction. All index-aligned with cubePositions so occlusion/
+     * reflection/replay stay length-stable. `rampFlags[i]` = cube i is a pyramid. `rampFacings[i]`
+     * ∈ 0..3 is retained (seeded draw + array) for RNG-stream parity / back-compat only — the pyramid
+     * is symmetric, so facing no longer steers the collider or the mesh. The scene hides ramp cube
+     * instances (zero-scale) + draws the pyramids.
+     */
+    private readonly cubeBodyPtrs: number[] = []
+    readonly rampFlags: boolean[] = []
+    readonly rampFacings: number[] = []
+    /** Physics-authoritative pyramid footprint (= cubeScale) + rise — render must use these, not store. */
+    readonly rampSize: number
+    readonly rampRise: number = RAMP.rise
 
     /**
      * Per-obstacle orientation aligning the box's local +Y to the terrain normal, so
@@ -305,6 +351,7 @@ export class MarbleSim {
         this.seed = config.seed ?? DEFAULT_SIM_SEED
         this.rand = mulberry32(this.seed)
         this.cubeScale = config.obstacles?.cubeScale ?? 0
+        this.rampSize = this.cubeScale
         this.columnSize = config.obstacles?.columnSize ?? 0
         this.columnHeight = config.obstacles?.columnHeight ?? 0
         this.physics = config.physics ?? PHYSICS_PRESETS[DEFAULT_PHYSICS_PRESET]
@@ -356,7 +403,10 @@ export class MarbleSim {
                 const half = obstacles.cubeScale / 2
                 // Sink into the ground (OBSTACLES.sink) so the base is buried, no floating bottom.
                 const y = getTerrainHeight(x, z) + half - OBSTACLES.sink
-                world.createStaticBox(x, y, z, half, half, half, OBSTACLES.friction, OBSTACLES.restitution)
+                const ptr = world.createStaticBox(x, y, z, half, half, half, OBSTACLES.friction, OBSTACLES.restitution)
+                this.cubeBodyPtrs.push(ptr)          // Feature E: keep the ptr so a ramp pass can swap it
+                this.rampFlags.push(false)
+                this.rampFacings.push(0)
                 this.cubePositions.push(new THREE.Vector3(x, y, z))
                 this.cubeQuaternions.push(MarbleSim.orientToTerrain(x, z))
             }
@@ -431,7 +481,51 @@ export class MarbleSim {
             }
         }
 
+        // --- Feature E: convert a seeded subset of cubes into launch PYRAMIDS. Drawn LAST from the
+        // seeded stream (after cubes/columns/props/crumble) so a 0/absent rampCubeRatio makes ZERO
+        // RNG draws → existing runs + tests stay byte-identical. Each pyramid: destroy the plain cube
+        // box, build a 4-sided stepped ziggurat in its footprint, hide the cube instance (render).
+        // The `facing` draw is kept (RNG-stream parity + rampFacings back-compat) but no longer used:
+        // the pyramid is symmetric on all four sides, so the ball launches off whichever face it climbs.
+        const rampRatio = obstacles?.rampCubeRatio ?? 0
+        if (rampRatio > 0) {
+            for (let i = 0; i < this.cubePositions.length; i++) {
+                if (this.rand() >= rampRatio) continue
+                const facing = Math.floor(this.rand() * 4) & 3
+                const pos = this.cubePositions[i]
+                world.destroyBody(this.cubeBodyPtrs[i])
+                MarbleSim.buildPyramidBoxes(world, pos.x, pos.y, pos.z, this.cubeScale)
+                this.rampFlags[i] = true
+                this.rampFacings[i] = facing
+            }
+        }
+
         this.syncSnapshots(true)
+    }
+
+    /**
+     * Feature E: build a 4-sided stepped PYRAMID (ziggurat) inside a cube's footprint. `steps`
+     * concentric, axis-aligned static boxes are stacked, each SOLID from the buried base up to its
+     * tier top and shrinking in footprint as it rises (widest at the ground, a small cap on top).
+     * No rotated-collider primitive needed; because every tier is centred on the cube, the four
+     * stepped faces are symmetric — the marble rolls up + launches off whichever side it hits. Box
+     * count = RAMP.steps (matches the cubeCount×steps assertion in ramp.test.ts).
+     */
+    private static buildPyramidBoxes(world: Box3DWorld, cx: number, cy: number, cz: number, size: number): void {
+        const half = size / 2
+        const buriedBaseY = cy - half                 // bottom of the (now removed) cube box
+        const groundTop = buriedBaseY + OBSTACLES.sink // ≈ terrain contact height
+        const steps = RAMP.steps
+        const stepRise = RAMP.rise / steps
+        for (let j = 0; j < steps; j++) {
+            // Tier j spans base → its top; footprint shrinks half·(steps−j)/steps: full at j=0, a
+            // small cap at the apex. Concentric solid boxes ⇒ their union is a square stepped pyramid.
+            const topY = groundTop + (j + 1) * stepRise
+            const centerY = (topY + buriedBaseY) / 2
+            const halfY = (topY - buriedBaseY) / 2
+            const hxz = (half * (steps - j)) / steps
+            world.createStaticBox(cx, centerY, cz, hxz, halfY, hxz, OBSTACLES.friction, OBSTACLES.restitution)
+        }
     }
 
     /** Teleport both bodies to spawn, zero velocities, reset AI + tag flag. */
@@ -999,6 +1093,23 @@ export class MarbleSim {
                 const rotZ = checkDirX * sinA + checkDirZ * cosA
                 this.avoidanceForce.set(rotX * ENEMY.avoidStrength, 0, rotZ * ENEMY.avoidStrength)
             }
+
+            // --- Debug overlay mirror (render-only; drawn by AIDebugOverlay when debugAI is on).
+            // Pure reads/copies — no RNG, no bodies, never fed back into sim logic → F9-safe.
+            const dbg = this.enemyDebug
+            dbg.active = true
+            dbg.state = this.aiState.state
+            dbg.canSee = canSee
+            dbg.lastKnown.copy(this.aiState.lastKnownPlayerPos)
+            dbg.target.copy(this.cachedTarget)
+            for (let k = 0; k < 4; k++) {
+                const wp = this.aiState.searchWaypoints[k]
+                if (wp) dbg.waypoints[k].copy(wp)
+            }
+            dbg.waypointIndex = this.aiState.currentWaypointIndex
+            dbg.avoidActive = avoidHit.hit
+            dbg.probeDir.set(checkDirX, 0, checkDirZ)
+            dbg.probeLen = rayLen
         }
 
         // --- Enemy movement application (every step) ---

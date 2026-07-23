@@ -27,6 +27,8 @@ export function UnifiedDebugMenu() {
     // Clutter (Phase P) — scale or kill the loose props + crumble blocks live.
     const propCount = useGameStore(s => s.propCount)
     const crumbleCount = useGameStore(s => s.crumbleCount)
+    const rampCubeRatio = useGameStore(s => s.rampCubeRatio)   // Feature E — launch ramps
+    const debugAI = useGameStore(s => s.debugAI)               // AI legibility overlay
 
     // Default to CLOSED (minimized) — the panel is bottom-left and opens upward on click,
     // so it doesn't blanket the play area on load (Grayson: "minimize it by default").
@@ -409,8 +411,42 @@ export function UnifiedDebugMenu() {
                             style={{ width: '100%' }}
                         />
 
+                        {/* Launch pyramids (Feature E) — fraction of unbreakable cubes turned into 4-sided pyramids */}
+                        <div className="debug-row" style={{ alignItems: 'center', marginTop: '6px' }}>
+                            <span>Launch Pyramids</span>
+                            <span style={{ color: '#aaa', fontSize: '10px' }}>{rampCubeRatio === 0 ? 'off' : `${Math.round(rampCubeRatio * 100)}% of cubes`}</span>
+                        </div>
+                        <input
+                            type="range" min={0} max={1} step={0.05} value={rampCubeRatio}
+                            onChange={(e) => setSetting('rampCubeRatio', parseFloat(e.target.value))}
+                            style={{ width: '100%' }}
+                        />
+
                         <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
-                            Loose Props = dust-bunny chunks you knock around. Crumble Blocks = crashable crates that shatter into brick debris. 0 = off. Changing either rebuilds the arena (resets the round).
+                            Loose Props = dust-bunny chunks you knock around. Crumble Blocks = crashable crates that shatter into brick debris. Launch Pyramids = share of the solid cubes turned into 4-sided pyramids you drive up and catch air off any side. 100% = every cube, 0 = off. Changing any rebuilds the arena (resets the round).
+                        </div>
+                    </div>
+
+                    {/* Debug visuals */}
+                    <div style={{ marginBottom: '12px' }}>
+                        <div className="debug-section-title">
+                            Debug Visuals
+                        </div>
+                        <div className="debug-row" style={{ alignItems: 'center' }}>
+                            <span>AI Vision Overlay</span>
+                            <button
+                                onClick={() => setSetting('debugAI', !debugAI)}
+                                style={{
+                                    background: debugAI ? '#39a0ff' : '#333',
+                                    color: '#fff', border: 'none', borderRadius: '4px',
+                                    padding: '2px 10px', fontSize: '10px', cursor: 'pointer',
+                                }}
+                            >
+                                {debugAI ? 'ON' : 'OFF'}
+                            </button>
+                        </div>
+                        <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
+                            Shows the enemy's vision range, line-of-sight ray (green = sees you, red = blocked), hunt state, last-known position, and search waypoints. Render-only — no effect on gameplay or replays.
                         </div>
                     </div>
 

@@ -28,6 +28,8 @@ import { CubeOcclusion } from './CubeOcclusion'
 import { ObstacleOcclusion } from './ObstacleOcclusion'
 import { Box3DParticles, dispatchFx, REFLECTION_EXCLUDE_LAYER } from './Box3DParticles'
 import { Box3DPathTrails } from './Box3DPathTrails'
+import { RampObstacles } from './RampObstacles'
+import { AIDebugOverlay } from './AIDebugOverlay'
 import { ReplayRecorder } from '../../systems/replay/recorder'
 import { ReplayPlayer } from '../../systems/replay/player'
 import { REPLAY_VERSION, type ReplayHeader } from '../../systems/replay/types'
@@ -133,6 +135,7 @@ function buildReplayHeader(sim: MarbleSim): ReplayHeader {
             propCount: s.propCount,
             crumbleCount: s.crumbleCount,
             columnsCrumble: s.columnsCrumble,
+            rampCubeRatio: s.rampCubeRatio,
         },
         terrainRoughness: s.terrainRoughness,
         recordedAt: Date.now(),
@@ -171,6 +174,7 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
     const cameraOffset = useGameStore(s => s.cameraOffset)
     // See-through obstacle reveal style (Settings → Visuals).
     const occlusionMode = useGameStore(s => s.occlusionMode)
+    const debugAI = useGameStore(s => s.debugAI)
     // Replay camera mode (reactive) — drives whether the free-orbit controls are mounted.
     const replayCamera = useReplayStore(s => s.camera)
 
@@ -394,13 +398,21 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
         if (!mesh || sim.cubePositions.length === 0) return
         const matrix = new THREE.Matrix4()
         const scaleOne = new THREE.Vector3(1, 1, 1)
+        const scaleZero = new THREE.Vector3(0, 0, 0)
         const identQ = new THREE.Quaternion()
         sim.cubePositions.forEach((pos, i) => {
-            matrix.compose(pos, sim.cubeQuaternions[i] ?? identQ, scaleOne)
+            // Feature E: ramp cubes are hidden here (zero-scale, like a smashed column) — the wedge
+            // is drawn by <RampObstacles>. Plain cubes render normally.
+            matrix.compose(pos, sim.cubeQuaternions[i] ?? identQ, sim.rampFlags[i] ? scaleZero : scaleOne)
             mesh.setMatrixAt(i, matrix)
         })
         mesh.instanceMatrix.needsUpdate = true
     }, [sim])
+
+    // Feature E: cubes converted to pyramids are "dead" for occlusion — fed to CubeOcclusion so its
+    // per-frame restore() never re-inflates a hidden ramp cube (the "cube on top of the pyramid" bug).
+    // Stable reference per sim so it doesn't retrigger the occlusion effects every render.
+    const cubeAlive = useMemo(() => sim.rampFlags.map(f => !f), [sim])
 
     // Columns are static too — set their instance matrices once per sim construction,
     // tilted to the terrain normal like the cubes.
@@ -847,6 +859,16 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
                 />
             </mesh>
 
+            {/* Feature E: launch ramps — stepped-wedge visuals over the ramp cubes (whose cube
+                instances are hidden in the matrix effect). Renders nothing when no cube is a ramp. */}
+            <RampObstacles sim={sim} texture={cubeTexture} />
+
+            {/* Debug: AI legibility overlay — vision range / LOS / hunt-state / search waypoints /
+                avoidance probe. Render-only, mounted only when the dev toggle is on. */}
+            {debugAI && (
+                <AIDebugOverlay sim={sim} playerPosRef={playerRenderPosRef} enemyPosRef={enemyRenderPosRef} />
+            )}
+
             {/* See-through cubes: fade obstacles blocking the camera→player sightline */}
             {sim.cubePositions.length > 0 && (
                 <CubeOcclusion
@@ -857,6 +879,8 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
                     texture={cubeTexture}
                     playerPosRef={playerRenderPosRef}
                     mode={occlusionMode}
+                    // Feature E: keep pyramid-converted cubes hidden (no cube on top of the pyramid).
+                    alive={cubeAlive}
                 />
             )}
 
@@ -927,6 +951,8 @@ export function Box3DScene() {
     const terrainRoughness = useGameStore(s => s.terrainRoughness)
     const crumbleCount = useGameStore(s => s.crumbleCount)
     const columnsCrumble = useGameStore(s => s.columnsCrumble)
+    // Feature E: ramp ratio is baked at sim construction (rebuild on change, like the other obstacles).
+    const rampCubeRatio = useGameStore(s => s.rampCubeRatio)
 
     // Stable obstacle-scatter seed for this page session: rebuilds triggered by a settings
     // change keep the SAME layout (only the changed dimension updates) instead of reshuffling
@@ -1070,7 +1096,9 @@ export function Box3DScene() {
                     // Crashable crumble blocks (Feature C) — smash into debris at speed.
                     crumbleCount: storeState.crumbleCount,
                     // Destructible columns (Feature D) — smash pillars into brick debris.
-                    columnsCrumble: storeState.columnsCrumble
+                    columnsCrumble: storeState.columnsCrumble,
+                    // Launch ramps (Feature E) — convert a seeded share of cubes into stepped wedges.
+                    rampCubeRatio: storeState.rampCubeRatio
                 },
                 events: {
                     onTag: () => {
@@ -1155,7 +1183,7 @@ export function Box3DScene() {
         // Arena/enemy settings are baked at construction, so a change to any of them
         // rebuilds the world+sim (stable seed keeps the layout coherent across rebuilds).
         // isReplaying/replayEpoch also rebuild: entering/leaving replay, or restarting it.
-    }, [heights, physicsPreset, cubeCount, cubeScale, columnCount, columnSize, columnHeight, propCount, crumbleCount, columnsCrumble, enemySize, enemyMass, isReplaying, replayEpoch])
+    }, [heights, physicsPreset, cubeCount, cubeScale, columnCount, columnSize, columnHeight, propCount, crumbleCount, columnsCrumble, rampCubeRatio, enemySize, enemyMass, isReplaying, replayEpoch])
 
     if (status.error) {
         return (

@@ -42,13 +42,25 @@ Order matters — least entangled first:
 Backlog, ordered by value — pull in only after 2 ships:
 - Round structure: best-of-N, escalating enemy speed
 - Role-swap tag (you become the hunter)
-- Multiple enemies with pack search behavior
+- Multiple enemies with pack search behavior — design the AI legibility overlay (Debug / Dev-Tools Backlog) first; it is the instrument for tuning these hunt patterns
 - Arena variation seeds
 
 ## Phase 4 — Art Direction Pass 🎨
 Deferred deliberately (your art background = this phase deserves real attention, not scraps):
 - Stylized shading pass, palette system, post stack
 - Sonar visualization (optional ripple VFX synced to audio pings)
+
+### 🎞️ Post-processing / screen-FX stack  ·  ⬜ **BACKLOG (design-only)**
+
+**Goal (Grayson):** a cinematic polish pass — depth of field, bloom, lens distortion / chromatic aberration, better anti-aliasing, vignette, and "other stuff" (motion blur, film grain, tone-map / colour grade).
+
+**Approach.** One toggleable `EffectComposer` stack (`@react-three/postprocessing`), wired into the Quality presets (Phase 2). Sensible order: render → **AA** (SMAA/TAA) → SSAO (opt) → **DoF** (bokeh) → **bloom** → **chromatic aberration + lens distortion** → vignette → tone-map → film grain. Master `postFX` toggle + a per-effect sub-toggle & intensity slider (your art eye drives the values).
+
+**Perf / mobile.** Post is fill-rate heavy → gate behind Quality preset; default most effects **off** on iPad/mobile (see [[game_marble_box3d_mobile_feasibility]]). AA + bloom + vignette alone ≈ 80% of the look for ~20% of the cost — land those first.
+
+**Determinism/feel.** Render-only, zero sim touch → **F9-safe by construction**, never touches replay bytes.
+
+**Scope note.** This is where the art background pays off — treat as its own art cycle, not scraps. **Est: 1–2 sessions, incremental.**
 
 ---
 
@@ -147,8 +159,101 @@ The Box3D WASM bridge (`box3dBridge.ts` → `marble_box3d_*` C funcs) exposes ex
 
 ---
 
+### 🟠 Feature E — Ramp / pyramid cubes (launch off the unbreakable squares)  ·  *stepped static box*  ·  ✅ **BUILT (2026-07-14)** — stepped no-WASM path (Grayson's pick over the WASM smooth-wedge). `rampCubeRatio` store key (default **0.5**) converts a seeded subset of cubes into cardinal-facing stepped-box wedges you drive up + launch off; ramp pass drawn LAST from the seeded stream (0 ratio = byte-identical, F9). Cube instance hidden + wedge drawn by `<RampObstacles>`; rides the replay header. Dev Tools → Clutter slider. Gate: tsc clean · vitest 134/134 ×3 · build 1.31 MB. **Upgrade path (backlog):** true smooth ramp = the rotated-static-box WASM primitive (Option 1 below). **⚠️ Playtest 2026-07-14 (Grayson): (a) BUG — a cube renders on top of each ramp (CubeOcclusion restore() overrides the cube-hide; fix = pass `alive=!rampFlags[i]`). (b) SPEC CHANGE — replace cubes ENTIRELY with pyramids (no cube+ramp coexistence, likely ALL cubes, maybe literal 4-sided pyramids not one-way wedges). See Known Issues.**
+
+**Goal (Grayson):** "half of the unbreakable squares → pyramids, so you can drive up and ramp off them." Turn some of the immovable cubes into ramps/wedges the marble climbs and launches off — the marble has no jump, so a ramp *is* the air/hop mechanic. A free source of verticality + trick lines through the arena.
+
+**The collider problem (Phase P budget).** A ramp face is a *sloped* surface. The three bridge colliders — static box (axis-aligned, no rotation), dynamic sphere, heightfield — can't express a clean wedge out of the box. Three ways to get the slope, cheapest→highest-fidelity:
+
+| Option | How | New WASM? | Feel | Cost |
+|---|---|---|---|---|
+| **1. Rotated static box (tilted slab)** ⭐ | One thin static box tilted to the ramp angle = a real ramp face. The rotated-static-box primitive is **already unblocked** (proven in-cloud, see [[game_marble_box3d_collider_primitives]] / [[game_marble_wasm_cloud_build]]). | rebuild only (in-cloud, proven) | true smooth ramp → clean launch | ~1 session |
+| **2. Heightfield mound** | Sculpt a local pyramid bump into the terrain heightfield (ties into Feature B). | none | coarse (64×64 @ 2u → rounded, not crisp); it is *floor*, not a placed obstacle — can only live where terrain is authored | cheap |
+| **3. Stepped box ziggurat** | Stack a few shrinking axis-aligned static boxes into stairs. | none | choppy stair-launch, not a smooth ramp | medium |
+
+**Recommend Option 1** — the primitive that blocked tilted colliders is gone, so a real wedge is now a sim/render + rebuild job, and it gives the launch feel Grayson is describing. Option 2 is the zero-risk fallback if we do not want to spend the rebuild.
+
+**Design sketch (Option 1).**
+- New store key `rampCubeRatio` (default **0.5** — Grayson's "half"): of the unbreakable cubes, a seeded subset becomes ramps; the rest stay square. Ratio + seed ride the replay header so replays rebuild the same ramp layout.
+- Visual = a wedge/pyramid mesh over the tilted-slab collider (visual≠collider is house style). Orientation seeded so ramps face varied directions (or face-toward-arena-center for readable launch lines — decide at build).
+- Launch feel is emergent: ball speed × ramp angle → air. Tune ramp angle (store key) so a normal coast gives a *small* hop and a fast line gives real air. No new jump code.
+- Determinism: ramp selection + orientation drawn from seeded RNG **after** existing streams so `rampCubeRatio:0` runs stay byte-identical.
+
+**Scope cuts (named):** unbreakable only (ramps do not crumble — they are the stable scenery vs Feature C/D smashables); no landing-trick scoring in v1 (just the launch physics); ramp count folds into existing cube count (we convert, not add, so body budget is unchanged).
+
+**Risk:** the raycast fact — a ramp/wedge is a new occluder shape for enemy LOS; small/modest sizes keep "ramp as soft cover" reading as emergent. **Est: ~1 session (Option 1).**
+
+---
+
+### 🧪 Physics pass — "more physics things" (idea pool)  ·  ⬜ **BACKLOG**
+
+A running grab-bag of physics-showcase ideas to pull opportunistically, now that the bridge has **box + sphere + heightfield + dynamic-box** (+ rotated static box once Feature E lands). Cheap render/sim ones first; bridge-change ones flagged **WASM-gated**.
+
+- **Moving / kinematic hazards** — sliding walls, sweeping bars, rotating platforms _(needs kinematic-body support — check bridge; likely WASM-gated)_.
+- **Toppling stacks** — Jenga-ish brick towers from dynamic boxes _(primitive already exists; deferred from Feature C/D — sim/render only)_.
+- **Bumpers / boost pads** — high-restitution zones or impulse pads that fling the marble _(mostly sim; a pad = trigger volume + impulse)_.
+- **Explosive barrels** — a crumble block that bursts with an outward **radial impulse** on nearby bodies _(reuses smash machinery + a neighbour query)_.
+- **Chain reactions** — knock one prop into a cluster _(already partly emergent via Feature A props; tune counts/placement)_.
+- **Wind / force volumes** — a directional force field that pushes light bodies (props, debris) but barely moves the player _(sim-side force accumulation)_.
+- **Ice / mud zones** — per-region floor friction. ⚠️ **BLOCKED:** heightfield is a single friction value → needs per-material zones = **bridge change**.
+- **Debris joints / ragdoll-ish links** — constraints between chunks _(needs a joint primitive = bigger **WASM-gated** lift)_.
+
+**Rule:** each becomes its own card when pulled (goal → collider mapping → determinism note → est), same as Features A–E. **Est: pick-and-mix, ~½–1 session each.**
+
+---
+
 ### 📌 Phase P exit gate (per feature, when pulled)
 Sim/unit tests green (scatter + roughness determinism) · full suite green · `tsc -b` + `vite build` clean · **Grayson playtest** (the feel verdict — clutter density, floor roughness amount, debris drama). Record in STATUS.md.
+
+---
+
+## 🔎 Debug / Dev-Tools Backlog
+
+Read-only visualization + tuning aids. None change gameplay or the sim, so all are **F9-safe by construction** (they read sim-owned state and draw only) and gate cheaply. Dev-only toggles (default off).
+
+### 🛰️ AI legibility overlay — enemy vision & hunt patterns  ·  ✅ **BUILT (2026-07-14)** — `debugAI` dev toggle (Dev Tools → Debug Visuals). Draws vision-range ring, LOS ray (green sees / red blocked — real filtered raycast), hunt-state, last-known marker, movement target, + the 4 search waypoints & path (the visible hunt pattern). Reads render-only `MarbleSim.enemyDebug`; zero sim/RNG impact (F9-safe). Gate: tsc clean · vitest 134/134 · build clean. Richer than first designed: the sim already does a real vision raycast + 4-waypoint spiral search, so all layers are live data, not stubs.
+
+**Goal (Grayson):** "debug visuals for how far the enemy can see, different hunting patterns, that sort of thing — design a system, leave it in the backlog for now." Make the enemy's "mind" visible so we can *tune* the AI now and *design* new search behaviors later against something we can see instead of guess at.
+
+**Why it is cheap.** `EnemyAI.ts` is already pure functions — the state we would draw (vision result, hunt state, targets, avoidance probes) is already computed each tick; the overlay just surfaces it. No AI rewrite; mostly a render layer + a few state getters exposed on the sim snapshot.
+
+**What it draws (layers, each independently toggleable):**
+- **Vision range** — a ground ring (or cone, if/when vision becomes directional) at the enemy sight radius. Instantly shows "how far can it see."
+- **Line-of-sight ray** — the existing `worldRaycast` enemy→player check, drawn as a line: **green = clear (it sees you)**, **red = blocked** (a prop/column/ramp is soft cover). The single most useful layer — it makes the "props are cover" mechanic legible.
+- **Hunt state** — color the enemy or float a tag: **chase** (has LOS / locked) vs **search** (lost you, heading to last-known) vs **patrol/wander** (no target). Reads the existing state machine.
+- **Last-known-player marker** — a ghost pip where the enemy last had LOS; the point it is searching toward. Shows *why* it moves where it does after you break line of sight.
+- **Avoidance probes** — the short obstacle-avoidance rays already cast, drawn as stubs, so "why did it swerve" is visible.
+- **Heading / velocity arrow** — where it is actually going this tick.
+
+**Why build it before the pack-AI backlog.** Phase 3 lists "multiple enemies with pack search behavior." You cannot design pack/flanking search by feel alone — this overlay is the instrument that makes those "different hunting patterns" designable. Build the lens first; it de-risks that whole feature.
+
+**Design (implementation shape).**
+- Store key `debugAI` (default off, Dev Tools menu), optionally per-layer sub-toggles.
+- A dedicated overlay group (three.js `LineSegments` / rings / sprites) reading a `enemyDebug` block added to the sim snapshot (visionRadius, losHit:boolean, state, lastKnownPos, avoidRays[], heading). Sim exposes it; render draws it. No new sim *logic*, just exposure.
+- Zero determinism impact: draws from existing state, allocates no RNG, adds no bodies → F9 holds, replays unaffected.
+
+**Scope (v1, when pulled):** visualize the *current* single-enemy AI only; no behavior changes, no in-overlay editing of AI params (that is a later "AI tuning panel"). Multi-enemy color-coding lands with the multi-enemy feature. **Est: ~½–1 session when pulled.**
+
+---
+
+## 🐞 Known Issues — 2026-07-14 playtest (Grayson) → 2026-07-15 (session 32) dispositions
+
+Three items surfaced playtesting the Feature E / overlay build. **s32 status inline below.**
+
+### 1. 🎞️ Replay desync — replay shows events that didn't happen  ·  ⚠️ **NOT REPRODUCIBLE at the sim level (s32)** — reframed
+**Symptom (Grayson):** "the replay doesn't seem to be fully lined up… it shows in the replay that I hit the side but I don't think I did. Wondering if some of it is offset."
+**s32 finding (headless, real WASM):** built `ReplayDeterminismObstacles.test.ts` — record→replay a 400-step scripted run through the FULL live clutter (heightfield terrain, 30 cubes, columns, 24 props, 12 crumble blocks, **rampCubeRatio:1 pyramids**) with the enemy AI running a real chase→**tag→catch**, rebuilt from the header alone. Result: **BIT-IDENTICAL at every step** (asserted per-step, not just the endpoint). So the core sim record→replay is **provably deterministic** — the "determinism leak" theory is *disproven* for the sim path. The old wedge had a **vertical launch wall** on its high side (a real "hit the side" surface); the pyramid conversion (s32) **removes all vertical walls** (4 sloped faces), which likely resolves much of the "hit the side" perception on its own.
+**Remaining suspects (render / settings, NOT sim):** (a) the free-orbit + slow-mo replay camera revealing grazes/overlaps the live chase-cam hid; (b) settings drift — `terrainRoughness`/`physicsPreset` changed between recording and watching (header carries roughness, but a mid-session change to the store terrain global could desync); (c) the stepped-collider vs smooth-pyramid visual gap (small: 6 steps over 1.4u). **Next step: re-playtest the pyramid build first.** If "hit the side" persists, instrument render-side (log sim vs rendered ball position per frame) rather than hunting a sim leak the headless guard says isn't there.
+
+### 2. 🎯 Tag pipeline — phantom tags in replay; real near-misses don't register  ·  🟡 **in-game half OPEN**, replay half explained (s32)
+**Symptom (Grayson):** "in the replay… it looks like I get tagged several times. In game it kind of feels like I get tagged a couple times but it doesn't actually register."
+**s32 read:** the *replay* "several tags" is NOT divergence (see #1 — replay is bit-identical). It's the recorded **post-tag settle** (s30 `tagSettleFrames`=16): the enemy homes in and visibly overlaps/bounces the player for the settle beat before the freeze — under the slow-mo free-orbit replay cam that reads as multiple tags. Expected behavior, not a bug. The *in-game* "feels tagged but doesn't register" is the **real, separate** issue: the tag fires only when centers are within `RULES.tagSlack` (0.1u) + radii, so a glancing overlap slips through.
+**Investigate (in-game feel only):** a slightly more forgiving tag radius, or a swept/overlap test instead of pure center-distance, in the sim's tag check. Low-risk, F9-safe if the threshold rides tuning.
+
+### 3. 🟠 Cubes → pyramids (was: ramp renders a cube on top)  ·  ✅ **SHIPPED (session 32)**
+**Symptom (Grayson):** "all the ramps had a cube on top of them… all cubes replaced by pyramids." + "basically all the cubes should be pyramids… four-sided pyramids, not a wedge."
+**Delivered (s32):** the one-way stepped wedge is replaced by a **4-sided stepped pyramid** (`MarbleSim.buildPyramidBoxes` — concentric shrinking axis-aligned static boxes, no WASM; symmetric, so the ball rolls up + launches off ANY side). Visual = a literal smooth square pyramid (`RampObstacles`). **Ratio → 1.0 by default** (every solid cube becomes a pyramid; `SCHEMA_VERSION` 10→11 drops the persisted 0.5 so old saves adopt it). **Cube-on-top fixed:** `CubeOcclusion` now takes an `alive` prop (`!rampFlags[i]`) so a converted cube stays hidden. Facing draw kept for RNG-stream parity (unused by the symmetric pyramid). Crumble blocks + columns untouched. Verified: tsc clean, vitest **135/135 ×3**, build 1.312 MB.
+**Deferred lever:** if the stepped-collider-under-smooth-visual gap bugs the launch feel, upgrade to WASM tilted-slab faces (true smooth ramp) — noted, not built (kept this cycle no-WASM).
 
 ---
 

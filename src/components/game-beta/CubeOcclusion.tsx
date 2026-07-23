@@ -27,9 +27,16 @@ type Props = {
     playerPosRef: React.MutableRefObject<THREE.Vector3>
     /** Reveal style. */
     mode: OcclusionMode
+    /**
+     * Optional per-cube alive flags (Feature E: cubes converted to pyramids are "dead" here),
+     * index-aligned with centers. A dead cube stays zero-scaled and is excluded from occlusion
+     * restore — without this, the per-frame restore() re-inflates a pyramid's hidden cube, drawing
+     * a cube on top of the pyramid. Omit to treat every cube as a normal solid.
+     */
+    alive?: boolean[]
 }
 
-export function CubeOcclusion({ cubesRef, centers, quaternions, cubeScale, texture, playerPosRef, mode }: Props) {
+export function CubeOcclusion({ cubesRef, centers, quaternions, cubeScale, texture, playerPosRef, mode, alive }: Props) {
     return (
         <ObstacleOcclusion
             meshRef={cubesRef}
@@ -39,6 +46,7 @@ export function CubeOcclusion({ cubesRef, centers, quaternions, cubeScale, textu
             texture={texture}
             playerPosRef={playerPosRef}
             mode={mode}
+            alive={alive}
         />
     )
 }

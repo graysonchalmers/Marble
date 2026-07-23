@@ -2,7 +2,7 @@ import type { SettingsState } from "./types";
 import { MOVEMENT, ENEMY, DEFAULT_TERRAIN_ROUGHNESS, DEFAULT_CRUMBLE_COUNT } from "../systems/sim/tuning";
 
 const STORAGE_KEY = "MARBLE_GAME_SETTINGS_V2";
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 11;
 
 export const DEFAULT_SETTINGS: SettingsState = {
   jumpForce: 5,
@@ -33,6 +33,13 @@ export const DEFAULT_SETTINGS: SettingsState = {
   // Feature D: columns are destructible by default (Grayson: "make ALL the columns destructible")
   // — smash a pillar at speed and it bursts into brick debris. Toggle in Settings → Environment.
   columnsCrumble: true,
+  // Feature E: EVERY unbreakable cube becomes a 4-sided launch pyramid by default (Grayson: "all
+  // the cubes should be pyramids, not wedges"). 1 = all cubes → pyramids, 0 = all plain cubes; a
+  // fractional value keeps a seeded share as plain cubes. Tune live in Dev Tools → Clutter.
+  rampCubeRatio: 1.0,
+  // AI legibility overlay (dev-only, default off) — draws enemy vision range / LOS / hunt-state /
+  // search waypoints. Render-only, zero sim impact. Toggle in Dev Tools.
+  debugAI: false,
   soundEnabled: true,
   physicsRate: 60, // Changed default to 60 for Medium preset
   shadowsEnabled: true,
@@ -155,6 +162,16 @@ function migrate(saved: any): SettingsState {
     }
     // v9: added columnsCrumble (Feature D — destructible columns). No action needed — the
     // DEFAULT_SETTINGS merge below seeds it (true) for old saves; the bump is just explicit.
+    // v10: added rampCubeRatio (Feature E — launch ramps) + debugAI (AI overlay). No action
+    // needed — the DEFAULT_SETTINGS merge below seeds them for old saves; the bump is explicit.
+    if (version < 11) {
+      // Spec change (Grayson): cubes are REPLACED by 4-sided pyramids, not augmented, and it's now
+      // ALL cubes, not half — so the default rampCubeRatio moved 0.5 → 1.0. Same {...DEFAULT, ...saved}
+      // gotcha as v7/v8: a persisted 0.5 would WIN the merge and keep half the cubes square. Drop the
+      // persisted value so old saves re-adopt the new all-pyramids default. (Re-tune live in Dev Tools
+      // → Clutter; that choice persists forward from v11.)
+      delete saved.rampCubeRatio;
+    }
   }
 
   return {

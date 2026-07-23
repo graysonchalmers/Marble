@@ -360,3 +360,30 @@ export const DEFAULT_PLAYFEEL_PRESET: PlayfeelPresetName = 'classic'
 
 /** Store keys a play-feel preset owns — changing any of these flips the preset to `custom`. */
 export const PLAYFEEL_KEYS = ['physicsPreset', 'playerDrift', 'downhillRoll', 'jumpHeight', 'enemySpeed'] as const
+
+/**
+ * Phase P Feature E — launch ramps (stepped static-box wedges converted from cubes).
+ * No rotated-collider primitive needed: the steps are axis-aligned and the ramp faces a
+ * cardinal direction. Kept low + climbable for a radius-0.5 marble (roll up, pop off); the
+ * true smooth-wedge version is the WASM upgrade documented in docs/PLAN.md Feature E.
+ */
+export const RAMP = {
+    /** Stepped boxes approximating the slope. More = smoother climb, more static bodies. */
+    steps: 6,
+    /** Total rise (u) from ground to the launch lip. ~1.4u over a 3.5u run ≈ a climbable, poppy ramp. */
+    rise: 1.4,
+} as const
+
+/**
+ * AI legibility overlay colours (Debug / Dev-Tools) — render-only, never touches the sim.
+ */
+export const AI_DEBUG = {
+    visionRing: '#39a0ff',
+    losClear: '#39ff88',
+    losBlocked: '#ff4444',
+    lastKnown: '#ffd23f',
+    target: '#b45cff',
+    waypoint: '#ffa63f',
+    waypointActive: '#ffffff',
+    avoid: '#ff7ac2',
+} as const

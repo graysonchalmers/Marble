@@ -35,6 +35,8 @@ export interface SettingsState {
   terrainRoughness: number; // variable-floor bump amplitude (0 = flat) — Feature B
   crumbleCount: number;     // crashable crumble blocks that burst into debris (0 = off) — Feature C
   columnsCrumble: boolean;  // make the scattered columns destructible → brick debris — Feature D
+  rampCubeRatio: number;    // fraction (0..1) of unbreakable cubes converted to 4-sided launch pyramids (1 = all, 0 = off) — Feature E
+  debugAI: boolean;         // AI legibility overlay: vision/LOS/hunt-state/waypoints (dev-only) — Debug
 
   // Perf / Graphics
   soundEnabled: boolean;
