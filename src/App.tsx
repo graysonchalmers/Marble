@@ -1,5 +1,4 @@
 import { useEffect } from 'react'
-import { QRCodeCanvas } from 'qrcode.react'
 import { useGameStore } from './store/useGameStore'
 import { SettingsMenu } from './components/ui/SettingsMenu'
 import { UnifiedDebugMenu } from './components/ui/UnifiedDebugMenu'
@@ -158,7 +157,9 @@ function AppInner() {
       {/* Top Left Container for Title & Minimap */}
       <div className="top-left-container">
 
-        {/* HUD: Title & Credits Card */}
+        {/* HUD: Title Card. The old attribution overlay (credits + QR to graysonchalmers.com)
+            was removed 2026-08-29 — the "Built by Grayson Chalmers" badge is the single
+            attribution now; the two overlapped. */}
         <div className="title-card">
           <div>
             <h1 className="title-text" style={{
@@ -167,30 +168,6 @@ function AppInner() {
             }}>
               Tag!
             </h1>
-            <div className="subtitle-container">
-              <span className="subtitle-name">Grayson Chalmers</span>
-              <span>+ Google Gemini</span>
-              <span>+ Antigravity</span>
-
-              <a
-                href="https://www.graysonchalmers.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="subtitle-link"
-              >
-                www.graysonchalmers.com
-              </a>
-            </div>
-          </div>
-
-          {/* QR Code */}
-          <div className="qr-container">
-            <QRCodeCanvas
-              value="https://www.graysonchalmers.com"
-              size={80}
-              fgColor="#000000"
-              bgColor="#ffffff"
-            />
           </div>
         </div>
 

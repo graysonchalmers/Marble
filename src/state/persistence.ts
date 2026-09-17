@@ -2,7 +2,7 @@ import type { SettingsState } from "./types";
 import { MOVEMENT, ENEMY, DEFAULT_TERRAIN_ROUGHNESS, DEFAULT_CRUMBLE_COUNT } from "../systems/sim/tuning";
 
 const STORAGE_KEY = "MARBLE_GAME_SETTINGS_V2";
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 
 export const DEFAULT_SETTINGS: SettingsState = {
   jumpForce: 5,
@@ -53,7 +53,10 @@ export const DEFAULT_SETTINGS: SettingsState = {
   useV2AI: true,
   playerAirControl: 0.1,
   enemyAirControl: 0,
-  controlsOpen: true,
+  // Settings/controls panel starts CLOSED so the game opens on gameplay, not a wall of dev
+  // sliders (2026-08-29). Reachable via the ⚙️ Show Controls button. The v12 migration below
+  // drops any persisted `controlsOpen: true` so returning visitors re-adopt this too.
+  controlsOpen: false,
   sectionStates: {
     gameplay: true,
     physics: true,
@@ -171,6 +174,13 @@ function migrate(saved: any): SettingsState {
       // persisted value so old saves re-adopt the new all-pyramids default. (Re-tune live in Dev Tools
       // → Clutter; that choice persists forward from v11.)
       delete saved.rampCubeRatio;
+    }
+    if (version < 12) {
+      // The settings panel now defaults CLOSED (opens on gameplay, not a dev UI). Same
+      // {...DEFAULT, ...saved} gotcha as v7/v8/v11: a persisted `controlsOpen: true` would WIN
+      // the merge and keep the panel open for everyone who'd already played. Drop it so old
+      // saves re-adopt the closed default. (Toggling ⚙️ Show Controls persists forward from v12.)
+      delete saved.controlsOpen;
     }
   }
 
