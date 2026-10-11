@@ -221,7 +221,8 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
                 moveBrakeDecel: s.moveBrakeDecel,
                 moveAirControl: s.moveAirControl,
                 enemyVelUnit: s.enemyVelUnit,
-                enemyVelAccel: s.enemyVelAccel
+                enemyVelAccel: s.enemyVelAccel,
+                beliefSearch: s.beliefSearch
             }
             if (s.gameState === 'setup') {
                 sim.resetPositions()

@@ -37,6 +37,7 @@ export interface SettingsState {
   columnsCrumble: boolean;  // make the scattered columns destructible → brick debris — Feature D
   rampCubeRatio: number;    // fraction (0..1) of unbreakable cubes converted to 4-sided launch pyramids (1 = all, 0 = off) — Feature E
   debugAI: boolean;         // AI legibility overlay: vision/LOS/hunt-state/waypoints (dev-only) — Debug
+  beliefSearch: boolean;    // Enemy searches by belief map (Tool-BehaviorLab hunter port) instead of 4 waypoints — Debug
 
   // Perf / Graphics
   soundEnabled: boolean;

@@ -4,7 +4,7 @@ import {
 } from './beliefSearch'
 
 const sum = (b: Float32Array) => b.reduce((s, v) => s + v, 0)
-const grid = (isOpen = (_x: number, _z: number) => true) => createBeliefGrid(-20, -20, 20, 20, 4, isOpen)   // 10 x 10
+const grid = (isOpen: (x: number, z: number) => boolean = () => true) => createBeliefGrid(-20, -20, 20, 20, 4, isOpen)   // 10 x 10
 
 describe('beliefSearch (lab hunter port)', () => {
     it('starts uniform over open cells and never puts mass in a closed one', () => {

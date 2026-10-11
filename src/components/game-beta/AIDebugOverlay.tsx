@@ -9,14 +9,18 @@
  *
  * Layers: vision range ring · line-of-sight ray (green = sees you / red = blocked by cover) ·
  * last-known-player marker · movement-target marker · search waypoints + path (search state only) ·
- * obstacle-avoidance probe.
+ * obstacle-avoidance probe · belief heat (belief search on: brighter = where the enemy thinks you are; the
+ * spiral waypoints are hidden then, since they no longer steer).
  */
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { MutableRefObject } from 'react'
 import type { MarbleSim } from '../../systems/sim/MarbleSim'
 import { AI_DEBUG } from '../../systems/sim/tuning'
+import { useGameStore } from '../../store/useGameStore'
+import { getTerrainHeight } from '../../utils/terrain'
+import { cellX, cellZ } from '../../systems/ai/beliefSearch'
 
 interface AIDebugOverlayProps {
     sim: MarbleSim
@@ -61,8 +65,44 @@ export function AIDebugOverlay({ sim, playerPosRef, enemyPosRef }: AIDebugOverla
         return { visionRing, los, avoid, searchPath, lastKnown, target, waypoints }
     }, [sim])
 
+    // Belief heat: one flat square per grid cell, built the first time the sim has a belief grid.
+    const groupRef = useRef<THREE.Group>(null)
+    const heatRef = useRef<{ mesh: THREE.InstancedMesh | null; color: THREE.Color }>({ mesh: null, color: new THREE.Color() })
+    useEffect(() => {
+        const heat = heatRef.current
+        return () => { heat.mesh?.geometry.dispose(); (heat.mesh?.material as THREE.Material | undefined)?.dispose() }
+    }, [])
+
     useFrame(() => {
         const dbg = sim.enemyDebug
+        const g = sim.beliefGrid
+        const beliefOn = !!g && useGameStore.getState().beliefSearch
+        const heat = heatRef.current
+        if (beliefOn && g && !heat.mesh && groupRef.current) {
+            const n = g.cols * g.rows
+            const geo = new THREE.PlaneGeometry(g.cell * 0.9, g.cell * 0.9).rotateX(-Math.PI / 2)
+            const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false })
+            const mesh = new THREE.InstancedMesh(geo, mat, n)
+            const m = new THREE.Matrix4()
+            for (let i = 0; i < n; i++) {
+                const x = cellX(g, i), z = cellZ(g, i)
+                mesh.setMatrixAt(i, m.makeTranslation(x, (sim.hasTerrain ? getTerrainHeight(x, z) : 0.5) + GROUND_Y + 0.05, z))
+                mesh.setColorAt(i, heat.color.setRGB(0, 0, 0))
+            }
+            mesh.frustumCulled = false
+            groupRef.current.add(mesh)
+            heat.mesh = mesh
+        }
+        if (heat.mesh) heat.mesh.visible = beliefOn && dbg.active
+        if (heat.mesh?.visible && g) {
+            let max = 0
+            for (let i = 0; i < g.belief.length; i++) if (g.belief[i] > max) max = g.belief[i]
+            for (let i = 0; i < g.belief.length; i++) {
+                const v = max > 0 ? Math.sqrt(g.belief[i] / max) : 0
+                heat.mesh.setColorAt(i, heat.color.setRGB(v, 0.35 * v, 0.05 * v))
+            }
+            heat.mesh.instanceColor!.needsUpdate = true
+        }
         const e = enemyPosRef.current
         const p = playerPosRef.current
         const visible = dbg.active
@@ -71,7 +111,7 @@ export function AIDebugOverlay({ sim, playerPosRef, enemyPosRef }: AIDebugOverla
         objs.avoid.visible = visible && dbg.avoidActive
         objs.lastKnown.visible = visible
         objs.target.visible = visible
-        const searching = dbg.state === 'search'
+        const searching = dbg.state === 'search' && !beliefOn
         objs.searchPath.visible = visible && searching
         objs.waypoints.forEach(w => (w.visible = visible && searching))
         if (!visible) return
@@ -115,7 +155,7 @@ export function AIDebugOverlay({ sim, playerPosRef, enemyPosRef }: AIDebugOverla
     })
 
     return (
-        <group>
+        <group ref={groupRef}>
             <primitive object={objs.visionRing} />
             <primitive object={objs.los} />
             <primitive object={objs.avoid} />
