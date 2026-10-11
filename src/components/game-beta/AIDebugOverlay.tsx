@@ -81,7 +81,7 @@ export function AIDebugOverlay({ sim, playerPosRef, enemyPosRef }: AIDebugOverla
         if (beliefOn && g && !heat.mesh && groupRef.current) {
             const n = g.cols * g.rows
             const geo = new THREE.PlaneGeometry(g.cell * 0.9, g.cell * 0.9).rotateX(-Math.PI / 2)
-            const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false })
+            const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false })
             const mesh = new THREE.InstancedMesh(geo, mat, n)
             const m = new THREE.Matrix4()
             for (let i = 0; i < n; i++) {
@@ -98,7 +98,7 @@ export function AIDebugOverlay({ sim, playerPosRef, enemyPosRef }: AIDebugOverla
             let max = 0
             for (let i = 0; i < g.belief.length; i++) if (g.belief[i] > max) max = g.belief[i]
             for (let i = 0; i < g.belief.length; i++) {
-                const v = max > 0 ? Math.sqrt(g.belief[i] / max) : 0
+                const v = max > 0 ? Math.pow(g.belief[i] / max, 0.35) : 0   // gentle curve so the whole cloud shows, not just the peak
                 heat.mesh.setColorAt(i, heat.color.setRGB(v, 0.35 * v, 0.05 * v))
             }
             heat.mesh.instanceColor!.needsUpdate = true
