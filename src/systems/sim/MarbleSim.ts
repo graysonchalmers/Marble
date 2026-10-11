@@ -199,6 +199,9 @@ export class MarbleSim {
     private readonly prevPlayerPos = new THREE.Vector3()
     private readonly prevEnemyPos = new THREE.Vector3()
     readonly playerVel = new THREE.Vector3()
+    // What the enemy last saw (updated only on AI ticks where it can see the player).
+    private readonly lastSeenPos = new THREE.Vector3()
+    private readonly lastSeenVel = new THREE.Vector3()
 
     readonly aiState: EnemyAIState = createAIState()
 
@@ -554,6 +557,8 @@ export class MarbleSim {
         this.aiState.stateTimer = 0
         this.aiState.currentWaypointIndex = 0
         this.aiState.lastKnownPlayerPos.set(0, 0, 0)
+        this.lastSeenPos.set(0, 0, 0)
+        this.lastSeenVel.set(0, 0, 0)
         if (this.currentAIState !== 'idle') {
             const prev = this.currentAIState
             this.currentAIState = 'idle'
@@ -1071,14 +1076,21 @@ export class MarbleSim {
                 canSee = !visionHit.hit || visionHit.fraction >= expectedFraction
             }
 
+            // The AI only gets what it has seen: last-seen pos/vel, refreshed while canSee. Passing the live
+            // values leaked the unseen player's true spot into lastKnownPlayerPos (alert -> search) and its
+            // live velocity into the search waypoints (found by Tool-BehaviorLab's no-cheat test, 2026-10-11).
+            if (canSee) {
+                this.lastSeenPos.copy(this.playerPosRef.current)
+                this.lastSeenVel.copy(this.playerVel)
+            }
             const prevState = this.aiState.state
-            const newState = updateAIState(this.aiState, canSee, this.playerPosRef.current, ENEMY.aiUpdateInterval, this.playerVel, this.rand)
+            const newState = updateAIState(this.aiState, canSee, this.lastSeenPos, ENEMY.aiUpdateInterval, this.lastSeenVel, this.rand)
             if (newState !== this.currentAIState) {
                 this.currentAIState = newState
                 this.events.onAIStateChange?.(prevState, newState)
             }
 
-            getMovementTarget(this.aiState, this.enemyPosRef.current, this.playerPosRef.current, this.playerVel, this.cachedTarget)
+            getMovementTarget(this.aiState, this.enemyPosRef.current, this.lastSeenPos, this.lastSeenVel, this.cachedTarget)
 
             // Obstacle avoidance probe along travel direction.
             const toTargetX = this.cachedTarget.x - enemyTrans.position.x
