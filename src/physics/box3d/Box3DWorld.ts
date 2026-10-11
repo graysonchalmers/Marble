@@ -20,6 +20,7 @@ export class Box3DWorld implements PhysicsWorldAdapter {
     private worldPtr = 0
     private bodies: number[] = []
     private smokeSpherePtr = 0
+    private destroyed = false
 
     constructor(bridge: MarbleBox3DBridgeExports) {
         this.bridge = bridge
@@ -27,6 +28,11 @@ export class Box3DWorld implements PhysicsWorldAdapter {
         this.velocityPtr = bridge.module._malloc(VELOCITY_BYTE_COUNT)
         this.raycastPtr = bridge.module._malloc(RAYCAST_BYTE_COUNT)
         this.reset()
+    }
+
+    /** True once destroy() has freed the world + scratch buffers; nothing may call into it after. */
+    get isDestroyed(): boolean {
+        return this.destroyed
     }
 
     get bridgeVersion(): number {
@@ -265,6 +271,7 @@ export class Box3DWorld implements PhysicsWorldAdapter {
     }
 
     destroy(): void {
+        this.destroyed = true
         this.destroyWorldOnly()
         this.bridge.module._free(this.transformPtr)
         this.bridge.module._free(this.velocityPtr)

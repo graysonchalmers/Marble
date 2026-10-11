@@ -34,6 +34,7 @@ import { ReplayRecorder } from '../../systems/replay/recorder'
 import { ReplayPlayer } from '../../systems/replay/player'
 import { REPLAY_VERSION, type ReplayHeader } from '../../systems/replay/types'
 import { useReplayStore } from '../../state/replayStore'
+import { makeSimTick } from './simTick'
 // Terrain is a single source of truth now (utils/terrain.ts): the collider heightfield, the
 // render mesh, obstacle placement, and downhill roll all read getTerrainHeight — and the
 // variable-floor roughness (Feature B) rides on top via setTerrainRoughness before we sample.
@@ -192,61 +193,7 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
     // Register ticks once. Tick fns read the store imperatively so the loop
     // never needs re-registration on state changes.
     useEffect(() => {
-        const tickSim = (dt: number) => {
-            // --- REPLAY: re-simulate from the recorded stream (ignores the game-state
-            // machine and live keyboard entirely). One recorded frame per fixed step. ---
-            const rp = replayRef.current
-            if (rp) {
-                const frame = rp.player.next()
-                if (frame) {
-                    sim.step(dt, frame.input, frame.params)
-                    useReplayStore.getState().reportPosition(rp.player.position)
-                } else {
-                    // Reached the end — freeze on the last frame.
-                    useReplayStore.getState().setPaused(true)
-                }
-                return
-            }
-
-            // --- LIVE play ---
-            const s = useGameStore.getState()
-            const params = {
-                enemySpeed: s.enemySpeed,
-                enemyAirControl: s.enemyAirControl,
-                playerDrift: s.playerDrift,
-                downhillRoll: s.downhillRoll,
-                jumpHeight: s.jumpHeight,
-                moveTopSpeed: s.moveTopSpeed,
-                moveAccel: s.moveAccel,
-                moveBrakeDecel: s.moveBrakeDecel,
-                moveAirControl: s.moveAirControl,
-                enemyVelUnit: s.enemyVelUnit,
-                enemyVelAccel: s.enemyVelAccel
-            }
-            if (s.gameState === 'setup') {
-                sim.resetPositions()
-                return
-            }
-            if (s.gameState === 'countdown') {
-                // Early release: the first control-key press during the countdown breaks the
-                // player free for a head start; the enemy stays pinned at spawn (freezeEnemy)
-                // until the timer hits zero and RulesSystem flips gameState to 'playing'.
-                const k = keys.current
-                if (!earlyReleasedRef.current && (k.w || k.a || k.s || k.d || k.space)) {
-                    earlyReleasedRef.current = true
-                }
-                if (!earlyReleasedRef.current) {
-                    sim.resetPositions()
-                    return
-                }
-                const releaseParams = { ...params, freezeEnemy: true }
-                sim.step(dt, k, releaseParams)
-                recorderRef.current.capture(k, releaseParams) // record the head-start frames too
-                return
-            }
-            sim.step(dt, keys.current, params)
-            recorderRef.current.capture(keys.current, params)
-        }
+        const tickSim = makeSimTick({ sim, keys, replayRef, recorderRef, earlyReleasedRef })
         const tickRules = (dt: number) => rulesSystem.tick(dt)
         const tickSonar = (dt: number) => sonarSystem.tick(dt)
 
