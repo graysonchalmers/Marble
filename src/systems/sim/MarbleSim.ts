@@ -34,6 +34,9 @@ import {
 } from './tuning'
 import type { PhysicsFeel } from './tuning'
 import { getTerrainHeight, getTerrainNormal } from '../../utils/terrain'
+import {
+    createBeliefGrid, resetBelief, spreadBelief, observeBelief, beliefSearchTarget, type BeliefGrid
+} from '../ai/beliefSearch'
 import { mulberry32, DEFAULT_SIM_SEED } from './rng'
 import { computeEjection } from './unstick'
 import { sweptMinDistance } from './sweptTag'
@@ -74,6 +77,12 @@ export interface SimParams {
      * head start while the countdown timer runs out. Default false (normal play).
      */
     freezeEnemy?: boolean
+    /**
+     * Belief-map search (ported from Tool-BehaviorLab's hunter): while searching, the enemy heads for where the
+     * player most likely is (a probability grid it spreads over time and clears wherever it can see) instead of
+     * the 4 fixed waypoints. Default false: the grid is never built and the sim is byte-identical.
+     */
+    beliefSearch?: boolean
 }
 
 /** Minimal shape of a Box3D linear/angular velocity read. */
@@ -202,6 +211,9 @@ export class MarbleSim {
     // What the enemy last saw (updated only on AI ticks where it can see the player).
     private readonly lastSeenPos = new THREE.Vector3()
     private readonly lastSeenVel = new THREE.Vector3()
+    /** Belief-map search grid; built on the first AI tick with params.beliefSearch. Render may read it (debug). */
+    private belief: BeliefGrid | null = null
+    get beliefGrid(): BeliefGrid | null { return this.belief }
 
     readonly aiState: EnemyAIState = createAIState()
 
@@ -541,6 +553,36 @@ export class MarbleSim {
         }
     }
 
+    /** Ground height under (x, z): the analytic terrain, or the flat test slab's top. */
+    private groundY(x: number, z: number): number {
+        return this.hasTerrain ? getTerrainHeight(x, z) : 0.5
+    }
+
+    /** Belief grid over the arena; cells inside a cube or column (grown by the enemy radius) are closed.
+     *  Pyramids (ramp cubes) stay open: the player can roll up and sit on them. */
+    private createBelief(): BeliefGrid {
+        const half = this.hasTerrain ? (TERRAIN.width * TERRAIN.scale) / 2 : 100
+        const pad = this.enemySize
+        return createBeliefGrid(-half, -half, half, half, 4, (x, z) => {
+            for (let i = 0; i < this.cubePositions.length; i++) {
+                const c = this.cubePositions[i]
+                if (!this.rampFlags[i] && Math.abs(x - c.x) < this.cubeScale / 2 + pad && Math.abs(z - c.z) < this.cubeScale / 2 + pad) return false
+            }
+            for (const c of this.columnPositions)
+                if (Math.abs(x - c.x) < this.columnSize / 2 + pad && Math.abs(z - c.z) < this.columnSize / 2 + pad) return false
+            return true
+        })
+    }
+
+    /** Could the enemy see a player standing at (x, z)? Same test as its player sight: range + a clear ray. */
+    private canSeeGround(ex: number, ey: number, ez: number, x: number, z: number): boolean {
+        const dx = x - ex, dy = this.groundY(x, z) + PLAYER.radius - ey, dz = z - ez
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
+        if (d >= ENEMY.visionDistance || d < 0.01) return d < 0.01
+        const hit = this.world.raycastClosest(ex, ey, ez, dx, dy, dz)
+        return !hit.hit || hit.fraction >= (d - PLAYER.radius - 0.05) / d
+    }
+
     /** Teleport both bodies to spawn, zero velocities, reset AI + tag flag. */
     resetPositions(): void {
         const w = this.world
@@ -559,6 +601,7 @@ export class MarbleSim {
         this.aiState.lastKnownPlayerPos.set(0, 0, 0)
         this.lastSeenPos.set(0, 0, 0)
         this.lastSeenVel.set(0, 0, 0)
+        if (this.belief) resetBelief(this.belief)
         if (this.currentAIState !== 'idle') {
             const prev = this.currentAIState
             this.currentAIState = 'idle'
@@ -1091,6 +1134,18 @@ export class MarbleSim {
             }
 
             getMovementTarget(this.aiState, this.enemyPosRef.current, this.lastSeenPos, this.lastSeenVel, this.cachedTarget)
+
+            // Belief-map search (flag): keep the grid current every AI tick; while searching, it picks the target.
+            if (params.beliefSearch) {
+                const g = this.belief ??= this.createBelief()
+                const ex = enemyTrans.position.x, ey = enemyTrans.position.y, ez = enemyTrans.position.z
+                const playerSpeed = params.moveTopSpeed ?? MOVEMENT.topSpeed
+                spreadBelief(g, Math.min(1, (playerSpeed * ENEMY.aiUpdateInterval) / g.cell))
+                observeBelief(g, canSee, this.lastSeenPos.x, this.lastSeenPos.z, ex, ez, ENEMY.visionDistance,
+                    (x, z) => this.canSeeGround(ex, ey, ez, x, z))
+                if (this.aiState.state === 'search' && beliefSearchTarget(g, ex, ez))
+                    this.cachedTarget.set(g.targetX, this.groundY(g.targetX, g.targetZ) + PLAYER.radius, g.targetZ)
+            }
 
             // Obstacle avoidance probe along travel direction.
             const toTargetX = this.cachedTarget.x - enemyTrans.position.x

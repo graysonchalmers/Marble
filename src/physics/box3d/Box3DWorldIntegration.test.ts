@@ -292,9 +292,10 @@ describe('Enemy AI only uses what it saw (no-cheat, real MarbleSim + WASM)', () 
     // Chase on the flat slab (always in view), then teleport the player out of vision range (> ENEMY.visionDistance)
     // to spot A or spot B, moving differently. The enemy saw neither spot, so its path must be identical in both runs.
     // Before the 2026-10-11 fix, MarbleSim passed the live (unseen) player pos/vel to the AI and the paths diverged.
-    it('once the enemy loses sight, where the unseen player really is does not change its path', async () => {
+    for (const beliefSearch of [false, true])
+    it(`once the enemy loses sight, where the unseen player really is does not change its path (beliefSearch ${beliefSearch})`, async () => {
         const settings = useGameStore.getState()
-        const params = { enemySpeed: settings.enemySpeed, enemyAirControl: settings.enemyAirControl }
+        const params = { enemySpeed: settings.enemySpeed, enemyAirControl: settings.enemyAirControl, beliefSearch }
         async function run(spot: { x: number; z: number; vx: number; vz: number }) {
             const world = await bootWorld()
             const sim = makeSim(world)
