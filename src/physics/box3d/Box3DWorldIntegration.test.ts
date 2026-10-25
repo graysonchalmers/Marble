@@ -288,6 +288,39 @@ describe('Box3D Headless Physical Integration (Feel Invariants, real MarbleSim)'
     })
 })
 
+describe('Enemy AI only uses what it saw (no-cheat, real MarbleSim + WASM)', () => {
+    // Chase on the flat slab (always in view), then teleport the player out of vision range (> ENEMY.visionDistance)
+    // to spot A or spot B, moving differently. The enemy saw neither spot, so its path must be identical in both runs.
+    // Before the 2026-10-11 fix, MarbleSim passed the live (unseen) player pos/vel to the AI and the paths diverged.
+    for (const beliefSearch of [false, true])
+    it(`once the enemy loses sight, where the unseen player really is does not change its path (beliefSearch ${beliefSearch})`, async () => {
+        const settings = useGameStore.getState()
+        const params = { enemySpeed: settings.enemySpeed, enemyAirControl: settings.enemyAirControl, beliefSearch }
+        async function run(spot: { x: number; z: number; vx: number; vz: number }) {
+            const world = await bootWorld()
+            const sim = makeSim(world)
+            for (let i = 0; i < 60; i++) sim.step(FIXED_DT, NO_INPUT, params)   // 1 s: idle -> alert -> chase
+            const before = sim.currentAIState
+            world.bodySetTransform(sim.playerBodyPtr, spot.x, 1.0, spot.z, 0, 0, 0, 1)
+            world.setLinearVelocity(sim.playerBodyPtr, spot.vx, 0, spot.vz)
+            const path: number[] = [], states: string[] = []
+            for (let i = 0; i < 180; i++) {
+                sim.step(FIXED_DT, NO_INPUT, params)
+                path.push(sim.enemyCurr.position.x, sim.enemyCurr.position.z)
+                states.push(sim.currentAIState)
+            }
+            world.destroy()
+            return { before, path, states }
+        }
+        const a = await run({ x: 80, z: 80, vx: 12, vz: 0 })
+        const b = await run({ x: -80, z: 80, vx: 0, vz: 8 })
+        expect(a.before).toBe('chase')
+        expect(a.states).toContain('search')              // it did lose sight
+        expect(a.states.slice(10)).not.toContain('chase') // and never re-acquired (so nothing legitimate to differ on)
+        expect(b.path).toEqual(a.path)
+    })
+})
+
 describe('Box3D Feature C crumble/smash (real MarbleSim + WASM)', () => {
     const CRUMBLE_OBSTACLES = { cubeCount: 0, cubeScale: 7, columnCount: 0, columnSize: 3, columnHeight: 12, crumbleCount: 1 }
 

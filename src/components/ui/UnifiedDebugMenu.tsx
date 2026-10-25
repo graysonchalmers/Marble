@@ -29,6 +29,7 @@ export function UnifiedDebugMenu() {
     const crumbleCount = useGameStore(s => s.crumbleCount)
     const rampCubeRatio = useGameStore(s => s.rampCubeRatio)   // Feature E — launch ramps
     const debugAI = useGameStore(s => s.debugAI)               // AI legibility overlay
+    const beliefSearch = useGameStore(s => s.beliefSearch)     // enemy belief-map search
 
     // Default to CLOSED (minimized) — the panel is bottom-left and opens upward on click,
     // so it doesn't blanket the play area on load (Grayson: "minimize it by default").
@@ -447,6 +448,22 @@ export function UnifiedDebugMenu() {
                         </div>
                         <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
                             Shows the enemy's vision range, line-of-sight ray (green = sees you, red = blocked), hunt state, last-known position, and search waypoints. Render-only — no effect on gameplay or replays.
+                        </div>
+                        <div className="debug-row" style={{ alignItems: 'center', marginTop: '8px' }}>
+                            <span>AI Belief Search</span>
+                            <button
+                                onClick={() => setSetting('beliefSearch', !beliefSearch)}
+                                style={{
+                                    background: beliefSearch ? '#39a0ff' : '#333',
+                                    color: '#fff', border: 'none', borderRadius: '4px',
+                                    padding: '2px 10px', fontSize: '10px', cursor: 'pointer',
+                                }}
+                            >
+                                {beliefSearch ? 'ON' : 'OFF'}
+                            </button>
+                        </div>
+                        <div style={{ fontSize: '9px', color: '#888', marginTop: '4px', lineHeight: 1.4 }}>
+                            When it loses you, the enemy searches where you could have gone (a probability map it clears wherever it can see) instead of circling your last-known spot. Changes gameplay; recorded in replays.
                         </div>
                     </div>
 

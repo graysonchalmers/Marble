@@ -40,6 +40,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   // AI legibility overlay (dev-only, default off) — draws enemy vision range / LOS / hunt-state /
   // search waypoints. Render-only, zero sim impact. Toggle in Dev Tools.
   debugAI: false,
+  beliefSearch: false,
   soundEnabled: true,
   physicsRate: 60, // Changed default to 60 for Medium preset
   shadowsEnabled: true,
@@ -187,6 +188,8 @@ function migrate(saved: any): SettingsState {
       // saves re-adopt the closed default. (Toggling ⚙️ Show Controls persists forward from v12.)
       delete saved.controlsOpen;
     }
+    // v13: added beliefSearch (enemy belief-map search, default off). No action needed — the
+    // DEFAULT_SETTINGS merge below seeds it for old saves; the bump is explicit.
   }
 
   return {
