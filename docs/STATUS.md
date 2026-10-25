@@ -25,7 +25,7 @@ _Last updated: 2026-10-25 · split; history archived_
 
 **Standing traps:**
 - Persistence merge gotcha: saved values win the `{...DEFAULT_SETTINGS, ...saved}` merge. Changing a default is a no-op for anyone with a save unless the migration does `delete saved.<key>` for it (pattern used at v7, v8, v11, v12). Always bump `SCHEMA_VERSION` and add a `version < N` branch; parallel branches bumping the same number collide on merge (as happened for 13).
-- WASM bridge: new collider primitives need a rebuild of the Box3D bridge (emscripten + `erincatto/box3d@aaa795e`, last done in a cloud container, session 34). After a rebuild F1 timing shifted 1.767s -> 1.750s from toolchain float drift; F9/replay stay bit-identical within one build. The old doc names `native/build-box3d-bridge.sh`, but `native/` is **not present on `v2` (unverified where it lives)**: check the snapshot and `public/box3d/bridge-manifest.json` first.
+- WASM bridge: new collider primitives need a rebuild of the Box3D bridge (emscripten + `erincatto/box3d@aaa795e`, last done in a cloud container, session 34). After a rebuild F1 timing shifted 1.767s -> 1.750s from toolchain float drift; F9/replay stay bit-identical within one build. Build scripts: `src/physics/box3d/native/build-box3d-bridge.sh` / `.ps1` (source `box3d_bridge.c`, notes in that folder's README); output goes to `public/box3d/`.
 - Windows/CRLF: `.gitattributes` normalizes to LF (`.bat`/`.ps1` CRLF). A big "all files modified" diff is usually CRLF churn: confirm with `git diff --ignore-cr-at-eol` before trusting it (it was NOT pure churn once, 2026-07-14).
 - Stale zero-byte `.git/index.lock`: move it aside, do not fight it.
 - Box3D `worldRaycast` has no body filter, so props can briefly block enemy line-of-sight.
@@ -47,7 +47,6 @@ _Last updated: 2026-10-25 · split; history archived_
 Run `npm test` and `npm run build` on the Envy (not yet done there), then have Grayson playtest the Cycle B colliders and the cylinder occlusion default; record results under Current state.
 
 ## ❓ Open questions
-- Where does the WASM build script live now (`native/` is absent on `v2`)?
 - Keep belief search opt-in, or make it the default once playtested?
 - Which of the old playtest bugs from sessions 17-34 are still live?
 
