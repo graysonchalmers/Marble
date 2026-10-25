@@ -521,3 +521,65 @@ describe('Box3D Feature D destructible columns (real MarbleSim + WASM)', () => {
         world.destroy()
     })
 })
+
+// Cycle B collider primitives (create_static_pyramid + create_static_cylinder) — proven against the
+// REAL WASM by raycasting the collider surface. The pyramid is a TRUE smooth 4-sided pyramid (single
+// convex hull), not the old stepped ziggurat: its top height falls off LINEARLY toward the base and
+// its surface normal is TILTED (a step would give a flat plateau + a straight-up normal). The
+// cylinder is ROUND: it collides within its radius but MISSES at the square-box diagonal corner
+// (where the old square column collider used to overhang).
+describe('Cycle B collider primitives (real WASM)', () => {
+    it('static pyramid collides as a smooth incline: linear slope + tilted normal, no treads', async () => {
+        const world = await bootWorld()
+        world.clearBodies()        // drop the smoke floor/sphere so only our pyramid exists
+        const half = 1.75          // cube half-size 3.5/2
+        const rise = 1.4
+        world.createStaticPyramid(0, 0, 0, half, rise, 0.5, 0.2)   // base at y=0, apex at y=rise
+        const down = (x: number, z: number) => world.raycastClosest(x, 50, z, 0, -100, 0)
+
+        // Apex: a single point at (0, rise, 0).
+        const apex = down(0, 0)
+        expect(apex.hit).toBe(true)
+        expect(apex.point.y).toBeCloseTo(rise, 1)          // ~1.4, no clipped plateau
+
+        // Along the +X face (z=0): height must be a LINEAR ramp y ≈ rise·(1 − x/half).
+        const near = down(half * 0.2, 0)                   // ≈ rise·0.8 = 1.12
+        const mid = down(half * 0.5, 0)                    // ≈ rise·0.5 = 0.70
+        expect(near.hit && mid.hit).toBe(true)
+        expect(near.point.y).toBeCloseTo(rise * 0.8, 1)    // within ~0.05
+        expect(mid.point.y).toBeCloseTo(rise * 0.5, 1)
+        expect(near.point.y).toBeGreaterThan(mid.point.y + 0.2)   // strictly higher toward apex — no flat tread
+
+        // Surface normal is TILTED outward (smooth slope), not straight up (a step would be ~(0,1,0)).
+        expect(Math.abs(mid.normal.x)).toBeGreaterThan(0.3)
+        expect(mid.normal.y).toBeLessThan(0.95)
+
+        world.destroy()
+    })
+
+    it('static cylinder is ROUND: on-radius hits, square-box diagonal corner misses', async () => {
+        const world = await bootWorld()
+        world.clearBodies()
+        const r = 1.0
+        const hh = 3.0
+        world.createStaticCylinder(0, hh, 0, r, hh, 16, 0.5, 0.2)  // spans y 0..2·hh, radius r
+        const down = (x: number, z: number) => world.raycastClosest(x, 50, z, 0, -100, 0)
+
+        // Straight above the axis → hits the top cap at y = 2·hh.
+        const center = down(0, 0)
+        expect(center.hit).toBe(true)
+        expect(center.point.y).toBeCloseTo(2 * hh, 1)
+
+        // On-axis at 0.9·r → still inside the round footprint → hit.
+        const inside = down(r * 0.9, 0)
+        expect(inside.hit).toBe(true)
+
+        // The square-box DIAGONAL corner (0.95·r in BOTH x and z ⇒ dist 1.34·r > r): an axis-aligned
+        // box of half-width r WOULD be hit here; the round cylinder is NOT (this is exactly the
+        // ~0.62u overhang the old square column collider had, now gone).
+        const corner = down(r * 0.95, r * 0.95)
+        expect(corner.hit).toBe(false)
+
+        world.destroy()
+    })
+})

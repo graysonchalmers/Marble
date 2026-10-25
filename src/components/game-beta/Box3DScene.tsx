@@ -10,7 +10,7 @@
  *  5. Handles camera/light follow, audio listener, and throttled store sync.
  */
 
-import { useEffect, useRef, useState, useMemo, type ComponentRef } from 'react'
+import { useEffect, useRef, useState, useMemo, useCallback, type ComponentRef } from 'react'
 import * as THREE from 'three'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { Environment, Sky, OrbitControls } from '@react-three/drei'
@@ -30,6 +30,8 @@ import { Box3DParticles, dispatchFx, REFLECTION_EXCLUDE_LAYER } from './Box3DPar
 import { Box3DPathTrails } from './Box3DPathTrails'
 import { RampObstacles } from './RampObstacles'
 import { AIDebugOverlay } from './AIDebugOverlay'
+import { RenderSubtraction } from './RenderSubtraction'
+import { createSubtractionVolume } from '../../systems/render/subtractionVolume'
 import { ReplayRecorder } from '../../systems/replay/recorder'
 import { ReplayPlayer } from '../../systems/replay/player'
 import { REPLAY_VERSION, type ReplayHeader } from '../../systems/replay/types'
@@ -174,6 +176,9 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
     const cameraOffset = useGameStore(s => s.cameraOffset)
     // See-through obstacle reveal style (Settings → Visuals).
     const occlusionMode = useGameStore(s => s.occlusionMode)
+    const subtractionRadius = useGameStore(s => s.subtractionRadius)
+    const subtractionFeather = useGameStore(s => s.subtractionFeather)
+    const subtractionShape = useGameStore(s => s.subtractionShape)
     const debugAI = useGameStore(s => s.debugAI)
     // Replay camera mode (reactive) — drives whether the free-orbit controls are mounted.
     const replayCamera = useReplayStore(s => s.camera)
@@ -347,6 +352,18 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
     // enemy uses the cheap scene env-map (one probe is enough — Grayson's call). Feeds the ball
     // material's envMap below; a MeshPhysicalMaterial clearcoat adds the Fresnel edge sheen.
     const { gl, scene, camera } = useThree()
+    const invalidate = useThree(s => s.invalidate)
+    useEffect(() => { invalidate() }, [invalidate, subtractionRadius, subtractionFeather, subtractionShape, occlusionMode])
+    const cutVolume = useMemo(createSubtractionVolume, [])
+    const updateCutVolume = useCallback(() => {
+        const settings = useGameStore.getState()
+        cutVolume.start.copy(camera.position)
+        cutVolume.end.copy(playerRenderPosRef.current)
+        cutVolume.enabled = settings.occlusionMode === 'cylinder'
+        cutVolume.radius = settings.subtractionRadius
+        cutVolume.feather = settings.subtractionFeather
+        cutVolume.shape = settings.subtractionShape
+    }, [camera, cutVolume])
     const REFLECT_RES = 256
     const reflectRT = useMemo(
         () => new THREE.WebGLCubeRenderTarget(REFLECT_RES, {
@@ -681,6 +698,7 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
 
     return (
         <>
+            <RenderSubtraction volume={cutVolume} update={updateCutVolume} />
             {/* Free-orbit REPLAY camera (replay 'free' only): user drags to orbit + scroll to zoom,
                 target follows the player each frame (see useFrame). NOT mounted during live play —
                 live gameplay uses the tight chase camera so the ball never drifts off-center (s28
@@ -832,7 +850,7 @@ function Box3DPlayableScene({ sim, keys, heights, recorder, replay }: PlayableSc
                 and a touch calmer through the center — the effect Grayson asked for. More reflective
                 overall than s23 (higher metalness, lower roughness, envMapIntensity 1.35). To dial:
                 clearcoat 0..1 = strength of the rim sheen; roughness/metalness = overall mirror. */}
-            <mesh ref={sphereRef} castShadow>
+            <mesh ref={sphereRef} castShadow userData={{ subtractExclude: true }}>
                 <sphereGeometry args={[0.5, 32, 16]} />
                 <meshPhysicalMaterial
                     map={ballTexture}

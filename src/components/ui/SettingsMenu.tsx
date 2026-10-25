@@ -78,7 +78,7 @@ function Select({ label, value, onChange, options }: { label: string, value: str
     return (
         <div style={{ marginBottom: '12px' }}>
             <span className="select-label">{label}</span>
-            <select value={value} onChange={(e) => onChange(e.target.value)} className="select-input">
+            <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className="select-input">
                 {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
         </div>
@@ -270,7 +270,7 @@ export function SettingsMenu() {
                             label="Play-Feel Preset"
                             value={playfeelPreset}
                             onChange={(v) => { if (v !== 'custom') applyPlayfeelPreset(v) }}
-                            options={[
+                              options={[
                                 ...Object.entries(PLAYFEEL_PRESETS).map(([key, p]: any) => ({ value: key, label: p.label })),
                                 { value: 'custom', label: 'Custom (edited)' },
                             ]}
@@ -398,9 +398,10 @@ export function SettingsMenu() {
                     >
                         <Select
                             label="See-Through Obstacles"
-                            value={occlusionMode}
-                            onChange={(v) => setOcclusionMode(v)}
-                            options={[
+                             value={occlusionMode}
+                             onChange={(v) => setOcclusionMode(v)}
+                             options={[
+                                  { value: 'cylinder', label: 'Soft cylinder (local cut)' },
                                 { value: 'ghost', label: 'Ghost (transparent)' },
                                 { value: 'wireframe', label: 'Wireframe (edges only)' },
                                 { value: 'xray', label: 'X-Ray (back faces)' },
@@ -409,8 +410,17 @@ export function SettingsMenu() {
                             ]}
                         />
                         <p style={{ fontSize: '10px', color: '#666', marginTop: '-4px', marginBottom: '10px' }}>
-                            How obstacles between the camera and your ball are revealed so you're never hidden.
-                        </p>
+                              Cut a soft viewing tunnel, or choose a whole-obstacle reveal.
+                          </p>
+                          {occlusionMode === 'cylinder' && <>
+                              <Select label="Cut Shape" value={store.subtractionShape} onChange={v => store.setSetting('subtractionShape', v as 'cylinder' | 'capsule')} options={[
+                                  { value: 'cylinder', label: 'Cylinder (flat ends)' },
+                                  { value: 'capsule', label: 'Capsule (rounded ends)' },
+                              ]} />
+                              <Slider label="Cut Radius" value={store.subtractionRadius} onChange={(v: number) => store.setSetting('subtractionRadius', v)} min={0.1} max={4} step={0.05} color={COLORS.muted} />
+                              <Slider label="Cut Feather" value={store.subtractionFeather} onChange={(v: number) => store.setSetting('subtractionFeather', v)} min={0} max={2} step={0.05} color={COLORS.muted} />
+                          </>}
+                          <a href="?lab=subtraction" style={{ color: '#bbb', fontSize: '12px' }}>Open subtraction sandbox ↗</a>
 
                         <div className="section-subtitle">Ground</div>
                         <Slider label="Grid Size" value={groundGridSize} onChange={setGroundGridSize} min={16} max={256} step={16} color={COLORS.muted} />

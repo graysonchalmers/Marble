@@ -32,6 +32,8 @@ function makeBridge(): MarbleBox3DBridgeExports {
         createStaticBox: vi.fn(() => nextBodyId++),
         createDynamicSphere: vi.fn(() => nextBodyId++),
         createDynamicBox: vi.fn(() => nextBodyId++),
+        createStaticPyramid: vi.fn(() => nextBodyId++),
+        createStaticCylinder: vi.fn(() => nextBodyId++),
         createHeightfield: vi.fn(() => nextBodyId++),
         bodyDestroy: vi.fn(),
         bodyApplyTorque: vi.fn(),
@@ -84,7 +86,7 @@ describe('Feature E — launch ramps', () => {
         expect(zeroRamp.rampFlags.every(f => f === false)).toBe(true)
     })
 
-    it('rampCubeRatio:1 turns every cube into a ramp — old box destroyed, stepped boxes built', () => {
+    it('rampCubeRatio:1 turns every cube into a ramp — old box destroyed, smooth hull pyramid built', () => {
         // Baseline: an identical no-ramp build, to isolate the ramp-pass deltas from the
         // world-reset scaffolding (MarbleSim resets the world, destroying the smoke bodies).
         const base = makeWorld()
@@ -99,8 +101,10 @@ describe('Feature E — launch ramps', () => {
         expect(sim.rampFacings.every(f => f >= 0 && f <= 3)).toBe(true)
         // Delta over baseline: every cube body destroyed once (converted).
         expect(vi.mocked(bridge.bodyDestroy).mock.calls.length).toBe(baseDestroys + CUBES_ONLY.cubeCount)
-        // Delta over baseline: cubeCount × RAMP.steps extra stepped boxes.
-        expect(vi.mocked(bridge.createStaticBox).mock.calls.length).toBe(baseBoxes + CUBES_ONLY.cubeCount * RAMP.steps)
+        // The pyramid is now ONE convex hull per cube (createStaticPyramid), not boxes — so no extra
+        // createStaticBox calls, and exactly cubeCount pyramid bodies.
+        expect(vi.mocked(bridge.createStaticBox).mock.calls.length).toBe(baseBoxes)
+        expect(vi.mocked(bridge.createStaticPyramid).mock.calls.length).toBe(CUBES_ONLY.cubeCount)
     })
 
     it('is seed-deterministic: same seed ⇒ identical ramp set + facings; ~ratio share converted', () => {

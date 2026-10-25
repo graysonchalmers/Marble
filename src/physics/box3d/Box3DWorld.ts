@@ -117,6 +117,46 @@ export class Box3DWorld implements PhysicsWorldAdapter {
     }
 
     /**
+     * Static box placed at an arbitrary orientation (quaternion). The bridge's create_static_box
+     * has no rotation arg, but b3Body_SetTransform rotates a static body's collider AND its
+     * broadphase proxy — verified: a plate tilted 60° makes a dropped sphere slide off, a flat one
+     * doesn't. So we create axis-aligned then set the rotated transform BEFORE the first step, and
+     * the body starts life rotated. Enables tilted obstacle colliders (match the visual tilt) and
+     * the smooth-pyramid face wedges — no new WASM primitive needed. Deterministic (no RNG, pure
+     * transform set). qx/qy/qz/qw = THREE.Quaternion component order.
+     */
+    createStaticBoxRotated(x: number, y: number, z: number, hx: number, hy: number, hz: number, qx: number, qy: number, qz: number, qw: number, friction = 0.5, restitution = 0.2): number {
+        const bodyPtr = this.createStaticBox(x, y, z, hx, hy, hz, friction, restitution)
+        this.bodySetTransform(bodyPtr, x, y, z, qx, qy, qz, qw)
+        return bodyPtr
+    }
+
+    /**
+     * Static convex-hull PYRAMID (Feature E smooth launch collider). Base square (half×half
+     * footprint) sits at world y = groundY; apex at (cx, groundY + rise, cz). A single convex hull
+     * → a clean incline the marble rolls up + launches off, matching the smooth pyramid visual.
+     */
+    createStaticPyramid(cx: number, groundY: number, cz: number, half: number, rise: number, friction = 0.5, restitution = 0.2): number {
+        if (!this.worldPtr) throw new Error('World not initialized')
+        const bodyPtr = this.bridge.createStaticPyramid(this.worldPtr, cx, groundY, cz, half, rise, friction, restitution)
+        if (!bodyPtr) throw new Error('Failed to create static pyramid')
+        this.bodies.push(bodyPtr)
+        return bodyPtr
+    }
+
+    /**
+     * Static CYLINDER (round column collider that matches the cylindrical column visual, replacing
+     * the square bounding box). Vertical (Y) axis, centred at (x, y, z), `sides`-gon tessellation.
+     */
+    createStaticCylinder(x: number, y: number, z: number, radius: number, halfHeight: number, sides = 16, friction = 0.5, restitution = 0.2): number {
+        if (!this.worldPtr) throw new Error('World not initialized')
+        const bodyPtr = this.bridge.createStaticCylinder(this.worldPtr, x, y, z, radius, halfHeight, sides, friction, restitution)
+        if (!bodyPtr) throw new Error('Failed to create static cylinder')
+        this.bodies.push(bodyPtr)
+        return bodyPtr
+    }
+
+    /**
      * Destroy a single body (removing it from the tracked list so world teardown
      * doesn't double-free it). Used by Feature C to retire crumble debris mid-round.
      * The native destroy (Known #7 fix) removes the body from the Box3D world before

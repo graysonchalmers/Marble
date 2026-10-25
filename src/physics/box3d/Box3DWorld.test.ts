@@ -31,6 +31,8 @@ function makeBridge() {
         createStaticBox: vi.fn(() => 1001),
         createDynamicSphere: vi.fn(() => 1002),
         createDynamicBox: vi.fn(() => 1007),
+        createStaticPyramid: vi.fn(() => 1021),
+        createStaticCylinder: vi.fn(() => 1022),
         createHeightfield: vi.fn(() => 2001),
         bodyDestroy: vi.fn(),
         bodyApplyTorque: vi.fn(),

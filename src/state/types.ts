@@ -67,7 +67,10 @@ export interface SettingsState {
   //   ghost = 40% transparent textured (default) · wireframe = edges-only bounding box ·
   //   xray = back-faces-only (shows the far interior wall, reads depth/collision) ·
   //   silhouette = dark tinted see-through fill + bright edges · off = stays solid.
-  occlusionMode: "ghost" | "wireframe" | "xray" | "silhouette" | "off";
+  occlusionMode: "cylinder" | "ghost" | "wireframe" | "xray" | "silhouette" | "off";
+  subtractionRadius: number;
+  subtractionFeather: number;
+  subtractionShape: 'cylinder' | 'capsule';
 
   // Audio settings
   masterVolume: number;
@@ -164,4 +167,3 @@ export interface GameStoreActions {
 }
 
 export type GameStore = SettingsState & SessionState & GameStoreActions;
-

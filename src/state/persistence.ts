@@ -2,7 +2,7 @@ import type { SettingsState } from "./types";
 import { MOVEMENT, ENEMY, DEFAULT_TERRAIN_ROUGHNESS, DEFAULT_CRUMBLE_COUNT } from "../systems/sim/tuning";
 
 const STORAGE_KEY = "MARBLE_GAME_SETTINGS_V2";
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 
 export const DEFAULT_SETTINGS: SettingsState = {
   jumpForce: 5,
@@ -75,7 +75,10 @@ export const DEFAULT_SETTINGS: SettingsState = {
   cubeColorBg: "#d3d3d3",
   cubeColorGrid: "#404040",
   uiAccentColor: "#E53935",
-  occlusionMode: "ghost",
+  occlusionMode: "cylinder",
+  subtractionRadius: 0.85,
+  subtractionFeather: 0.65,
+  subtractionShape: 'cylinder',
 
   masterVolume: 0.5,
   audioPitchEnabled: true,
@@ -126,6 +129,8 @@ export const V2_PRESET: SettingsState = {
 // Simple schema migration
 function migrate(saved: any): SettingsState {
   const version = saved.schemaVersion ?? saved.version ?? 0;
+  // Adopt the cylinder for the former default; preserve explicitly selected alternatives.
+  if (version < 13 && saved.occlusionMode === "ghost") saved.occlusionMode = "cylinder";
   
   if (version < SCHEMA_VERSION) {
     console.log(`Migrating settings from version ${version} to ${SCHEMA_VERSION}`);

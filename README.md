@@ -22,6 +22,12 @@ npm run test                 # vitest (8 tests — engine loop + event bus)
 
 ## 📚 Docs
 
+**Render subtraction lab:** open `?lab=subtraction` on the running game, or use
+Settings → Visuals → Open subtraction sandbox. Gameplay uses a soft camera-to-player
+cylinder; tune Cut Radius / Cut Feather / Cut Shape under Visuals. Scenery,
+terrain, particles and trails participate; the player stays visible. See
+[the volume API and limitations](docs/RENDER-SUBTRACTION.md).
+
 | Doc | What |
 |-----|------|
 | [docs/STATUS.md](docs/STATUS.md) | **Start here every session** — living truth: open phase, gates, evidence, known issues |

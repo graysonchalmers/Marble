@@ -29,7 +29,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { findOccludingBoxes } from '../../systems/render/occlusion'
 
-export type OcclusionMode = 'ghost' | 'wireframe' | 'xray' | 'silhouette' | 'off'
+export type OcclusionMode = 'cylinder' | 'ghost' | 'wireframe' | 'xray' | 'silhouette' | 'off'
 
 /** Box (cube) obstacle: uniform edge length. */
 export type BoxShape = { kind: 'box'; size: number }
@@ -140,7 +140,7 @@ export function ObstacleOcclusion({ meshRef, centers, quaternions, shape, textur
 
         // 'off' hides nothing — the mode-change effect already restored everything. A dead
         // (smashed) instance is never a valid occluder, so filter it out of the blocking set.
-        const occ = mode === 'off'
+        const occ = mode === 'off' || mode === 'cylinder'
             ? []
             : findOccludingBoxes(
                 camera.position, playerPosRef.current, centers, hx, hy, hz,
@@ -192,7 +192,7 @@ export function ObstacleOcclusion({ meshRef, centers, quaternions, shape, textur
         }
     })
 
-    if (mode === 'off') return null
+    if (mode === 'off' || mode === 'cylinder') return null
 
     return (
         <group>

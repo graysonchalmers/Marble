@@ -39,6 +39,8 @@ export interface MarbleBox3DBridgeExports {
     createStaticBox(worldPtr: number, x: number, y: number, z: number, hx: number, hy: number, hz: number, friction: number, restitution: number): number
     createDynamicSphere(worldPtr: number, x: number, y: number, z: number, radius: number, density: number, friction: number, restitution: number): number
     createDynamicBox(worldPtr: number, x: number, y: number, z: number, hx: number, hy: number, hz: number, density: number, friction: number, restitution: number): number
+    createStaticPyramid(worldPtr: number, cx: number, groundY: number, cz: number, half: number, rise: number, friction: number, restitution: number): number
+    createStaticCylinder(worldPtr: number, x: number, y: number, z: number, radius: number, halfHeight: number, sides: number, friction: number, restitution: number): number
     createHeightfield(worldPtr: number, heightsPtr: number, countX: number, countZ: number, scaleX: number, scaleY: number, scaleZ: number, minHeight: number, maxHeight: number, friction: number, restitution: number): number
     bodyDestroy(bodyPtr: number): void
     bodyApplyTorque(bodyPtr: number, tx: number, ty: number, tz: number): void
@@ -247,6 +249,8 @@ export async function loadBox3DBridgeModule(): Promise<MarbleBox3DBridgeExports>
             createStaticBox: module.cwrap('marble_box3d_create_static_box', 'number', ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number']),
             createDynamicSphere: module.cwrap('marble_box3d_create_dynamic_sphere', 'number', ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number']),
             createDynamicBox: module.cwrap('marble_box3d_create_dynamic_box', 'number', ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number']),
+            createStaticPyramid: module.cwrap('marble_box3d_create_static_pyramid', 'number', ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number']),
+            createStaticCylinder: module.cwrap('marble_box3d_create_static_cylinder', 'number', ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number']),
             createHeightfield: module.cwrap('marble_box3d_create_heightfield', 'number', ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number']),
             bodyDestroy: module.cwrap('marble_box3d_body_destroy', null, ['number']) as (...args: number[]) => number,
             bodyApplyTorque: module.cwrap('marble_box3d_body_apply_torque', null, ['number', 'number', 'number', 'number']) as (...args: number[]) => number,

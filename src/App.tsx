@@ -8,6 +8,7 @@ import { VersionOverlay } from './components/ui/VersionOverlay'
 import { ReplayBar } from './components/ui/ReplayBar'
 import { useReplayStore } from './state/replayStore'
 import { Box3DScene } from './components/game-beta/Box3DScene'
+import { SubtractionSandbox } from './components/game-beta/SubtractionSandbox'
 
 function GameUI() {
   const {
@@ -141,6 +142,7 @@ function GameUI() {
 }
 
 function App() {
+  if (new URLSearchParams(window.location.search).get('lab') === 'subtraction') return <SubtractionSandbox />
   return <AppInner />
 }
 
@@ -191,4 +193,3 @@ function AppInner() {
 }
 
 export default App
-

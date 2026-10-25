@@ -239,6 +239,123 @@ uintptr_t marble_box3d_create_dynamic_box(uintptr_t worldPtr, float x, float y, 
     return (uintptr_t)body;
 }
 
+// Static convex-hull PYRAMID (Feature E smooth collider): a true 4-sided pyramid as ONE convex
+// hull — base square + single apex — so the marble rolls up a clean incline and launches off the
+// tip, with none of the ridge/overhang artifacts a box-decomposition produces. Hull points are in
+// body-LOCAL space: the 4 base corners (±half, 0, ±half) on the ground plane + the apex
+// (0, rise, 0); the body sits at (cx, groundY, cz) so local y=0 is the terrain contact. As with the
+// stack b3BoxHull in create_static_box, b3CreateHullShape copies the hull, so the temp is freed
+// immediately after attach.
+EMSCRIPTEN_KEEPALIVE
+uintptr_t marble_box3d_create_static_pyramid(uintptr_t worldPtr, float cx, float groundY, float cz, float half, float rise, float friction, float restitution)
+{
+    MarbleBox3DBridgeWorld* bridgeWorld = (MarbleBox3DBridgeWorld*)worldPtr;
+    if (bridgeWorld == NULL || b3World_IsValid(bridgeWorld->worldId) == false)
+    {
+        return 0;
+    }
+
+    b3BodyDef bodyDef = b3DefaultBodyDef();
+    bodyDef.type = b3_staticBody;
+    bodyDef.position = marble_vec3(cx, groundY, cz);
+
+    b3BodyId bodyId = b3CreateBody(bridgeWorld->worldId, &bodyDef);
+    if (b3Body_IsValid(bodyId) == false)
+    {
+        return 0;
+    }
+
+    b3Vec3 pts[5];
+    pts[0] = marble_vec3(-half, 0.0f, -half);
+    pts[1] = marble_vec3(half, 0.0f, -half);
+    pts[2] = marble_vec3(half, 0.0f, half);
+    pts[3] = marble_vec3(-half, 0.0f, half);
+    pts[4] = marble_vec3(0.0f, rise, 0.0f);
+
+    b3HullData* hull = b3CreateHull(pts, 5, 8);
+    if (hull == NULL)
+    {
+        b3DestroyBody(bodyId);
+        return 0;
+    }
+
+    b3ShapeDef shapeDef = b3DefaultShapeDef();
+    shapeDef.baseMaterial.friction = friction;
+    shapeDef.baseMaterial.restitution = restitution;
+
+    b3ShapeId shapeId = b3CreateHullShape(bodyId, &shapeDef, hull);
+    b3DestroyHull(hull);
+    if (b3Shape_IsValid(shapeId) == false)
+    {
+        b3DestroyBody(bodyId);
+        return 0;
+    }
+
+    MarbleBox3DBody* body = malloc(sizeof(MarbleBox3DBody));
+    if (body == NULL)
+    {
+        b3DestroyBody(bodyId);
+        return 0;
+    }
+    body->bodyId = bodyId;
+    return (uintptr_t)body;
+}
+
+// Static CYLINDER (round column colliders that match the cylindrical column visual, replacing the
+// old square bounding box that overhung ~0.62u at the diagonals). Vertical (Y) axis via
+// b3CreateCylinder(height, radius, yOffset=0, sides); `sides` tessellation defaults to 16. Same
+// copy-then-free hull lifetime as the pyramid above.
+EMSCRIPTEN_KEEPALIVE
+uintptr_t marble_box3d_create_static_cylinder(uintptr_t worldPtr, float x, float y, float z, float radius, float halfHeight, int sides, float friction, float restitution)
+{
+    MarbleBox3DBridgeWorld* bridgeWorld = (MarbleBox3DBridgeWorld*)worldPtr;
+    if (bridgeWorld == NULL || b3World_IsValid(bridgeWorld->worldId) == false)
+    {
+        return 0;
+    }
+
+    b3BodyDef bodyDef = b3DefaultBodyDef();
+    bodyDef.type = b3_staticBody;
+    bodyDef.position = marble_vec3(x, y, z);
+
+    b3BodyId bodyId = b3CreateBody(bridgeWorld->worldId, &bodyDef);
+    if (b3Body_IsValid(bodyId) == false)
+    {
+        return 0;
+    }
+
+    // yOffset = -halfHeight centres the cylinder on the body origin (base at body.y-halfHeight, top
+    // at body.y+halfHeight) — same convention as create_static_box's centred box, so a column body
+    // positioned at its centre (like the cube) sits correctly and tilts about its middle.
+    b3HullData* hull = b3CreateCylinder(halfHeight * 2.0f, radius, -halfHeight, sides > 2 ? sides : 16);
+    if (hull == NULL)
+    {
+        b3DestroyBody(bodyId);
+        return 0;
+    }
+
+    b3ShapeDef shapeDef = b3DefaultShapeDef();
+    shapeDef.baseMaterial.friction = friction;
+    shapeDef.baseMaterial.restitution = restitution;
+
+    b3ShapeId shapeId = b3CreateHullShape(bodyId, &shapeDef, hull);
+    b3DestroyHull(hull);
+    if (b3Shape_IsValid(shapeId) == false)
+    {
+        b3DestroyBody(bodyId);
+        return 0;
+    }
+
+    MarbleBox3DBody* body = malloc(sizeof(MarbleBox3DBody));
+    if (body == NULL)
+    {
+        b3DestroyBody(bodyId);
+        return 0;
+    }
+    body->bodyId = bodyId;
+    return (uintptr_t)body;
+}
+
 EMSCRIPTEN_KEEPALIVE
 uintptr_t marble_box3d_create_heightfield(uintptr_t worldPtr, float* heights, int countX, int countZ, float scaleX, float scaleY, float scaleZ, float minHeight, float maxHeight, float friction, float restitution)
 {

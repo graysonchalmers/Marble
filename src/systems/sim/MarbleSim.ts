@@ -413,24 +413,32 @@ export class MarbleSim {
                 const half = obstacles.cubeScale / 2
                 // Sink into the ground (OBSTACLES.sink) so the base is buried, no floating bottom.
                 const y = getTerrainHeight(x, z) + half - OBSTACLES.sink
-                const ptr = world.createStaticBox(x, y, z, half, half, half, OBSTACLES.friction, OBSTACLES.restitution)
+                // Cycle B: tilt the COLLIDER onto the terrain normal too, so it matches the tilted
+                // visual (was axis-aligned — visual≠collider). Gentle (≤~15°); pure transform, no RNG.
+                const q = MarbleSim.orientToTerrain(x, z)
+                const ptr = world.createStaticBoxRotated(x, y, z, half, half, half, q.x, q.y, q.z, q.w, OBSTACLES.friction, OBSTACLES.restitution)
                 this.cubeBodyPtrs.push(ptr)          // Feature E: keep the ptr so a ramp pass can swap it
                 this.rampFlags.push(false)
                 this.rampFacings.push(0)
                 this.cubePositions.push(new THREE.Vector3(x, y, z))
-                this.cubeQuaternions.push(MarbleSim.orientToTerrain(x, z))
+                this.cubeQuaternions.push(q)
             }
         }
         this.columnsCrumble = obstacles?.columnsCrumble ?? false
         if (obstacles && obstacles.columnCount > 0) {
             for (const { x, z } of this.scatterPoints(obstacles.columnCount)) {
-                const halfSize = obstacles.columnSize / 2
+                const radius = obstacles.columnSize / 2
                 const halfHeight = obstacles.columnHeight / 2
                 const y = getTerrainHeight(x, z) + halfHeight - OBSTACLES.sink
-                const ptr = world.createStaticBox(x, y, z, halfSize, halfHeight, halfSize, OBSTACLES.friction, OBSTACLES.restitution)
+                // Cycle B: ROUND cylinder collider that matches the cylinder visual (was a square
+                // bounding box that overhung ~0.62u at the diagonals), tilted onto the terrain
+                // normal like the visual (columnQuaternions). 16-gon collider tessellation.
+                const q = MarbleSim.orientToTerrain(x, z)
+                const ptr = world.createStaticCylinder(x, y, z, radius, halfHeight, 16, OBSTACLES.friction, OBSTACLES.restitution)
+                world.bodySetTransform(ptr, x, y, z, q.x, q.y, q.z, q.w)
                 this.columnBodyPtrs.push(ptr)
                 this.columnPositions.push(new THREE.Vector3(x, y, z))
-                this.columnQuaternions.push(MarbleSim.orientToTerrain(x, z))
+                this.columnQuaternions.push(q)
                 this.columnAlive.push(true)
             }
         }
@@ -483,10 +491,12 @@ export class MarbleSim {
             const half = this.crumbleScale / 2
             for (const { x, z } of this.scatterPoints(this.crumbleCount)) {
                 const y = getTerrainHeight(x, z) + half - OBSTACLES.sink
-                const ptr = world.createStaticBox(x, y, z, half, half, half, OBSTACLES.friction, OBSTACLES.restitution)
+                // Cycle B: tilt the collider to the terrain normal to match the tilted visual.
+                const q = MarbleSim.orientToTerrain(x, z)
+                const ptr = world.createStaticBoxRotated(x, y, z, half, half, half, q.x, q.y, q.z, q.w, OBSTACLES.friction, OBSTACLES.restitution)
                 this.crumbleBodyPtrs.push(ptr)
                 this.crumblePositions.push(new THREE.Vector3(x, y, z))
-                this.crumbleQuaternions.push(MarbleSim.orientToTerrain(x, z))
+                this.crumbleQuaternions.push(q)
                 this.crumbleAlive.push(true)
             }
         }
@@ -514,28 +524,17 @@ export class MarbleSim {
     }
 
     /**
-     * Feature E: build a 4-sided stepped PYRAMID (ziggurat) inside a cube's footprint. `steps`
-     * concentric, axis-aligned static boxes are stacked, each SOLID from the buried base up to its
-     * tier top and shrinking in footprint as it rises (widest at the ground, a small cap on top).
-     * No rotated-collider primitive needed; because every tier is centred on the cube, the four
-     * stepped faces are symmetric — the marble rolls up + launches off whichever side it hits. Box
-     * count = RAMP.steps (matches the cubeCount×steps assertion in ramp.test.ts).
+     * Feature E (Cycle B): build a TRUE SMOOTH 4-sided PYRAMID collider inside a cube's footprint —
+     * ONE convex hull (base square + apex) via the WASM `create_static_pyramid` primitive. The
+     * marble rolls up a clean incline and launches off the apex, matching the smooth pyramid visual
+     * (RampObstacles) exactly — replaces the old axis-aligned stepped ziggurat, with none of the
+     * ridge/overhang a box-decomposition would introduce. Base square (size×size) sits at groundTop;
+     * apex at (cx, groundTop + RAMP.rise, cz) — same envelope the visual draws.
      */
     private static buildPyramidBoxes(world: Box3DWorld, cx: number, cy: number, cz: number, size: number): void {
         const half = size / 2
-        const buriedBaseY = cy - half                 // bottom of the (now removed) cube box
-        const groundTop = buriedBaseY + OBSTACLES.sink // ≈ terrain contact height
-        const steps = RAMP.steps
-        const stepRise = RAMP.rise / steps
-        for (let j = 0; j < steps; j++) {
-            // Tier j spans base → its top; footprint shrinks half·(steps−j)/steps: full at j=0, a
-            // small cap at the apex. Concentric solid boxes ⇒ their union is a square stepped pyramid.
-            const topY = groundTop + (j + 1) * stepRise
-            const centerY = (topY + buriedBaseY) / 2
-            const halfY = (topY - buriedBaseY) / 2
-            const hxz = (half * (steps - j)) / steps
-            world.createStaticBox(cx, centerY, cz, hxz, halfY, hxz, OBSTACLES.friction, OBSTACLES.restitution)
-        }
+        const groundTop = (cy - half) + OBSTACLES.sink   // terrain contact = pyramid base (matches the visual)
+        world.createStaticPyramid(cx, groundTop, cz, half, RAMP.rise, OBSTACLES.friction, OBSTACLES.restitution)
     }
 
     /** Teleport both bodies to spawn, zero velocities, reset AI + tag flag. */

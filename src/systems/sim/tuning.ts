@@ -369,15 +369,14 @@ export const DEFAULT_PLAYFEEL_PRESET: PlayfeelPresetName = 'classic'
 export const PLAYFEEL_KEYS = ['physicsPreset', 'playerDrift', 'downhillRoll', 'jumpHeight', 'enemySpeed'] as const
 
 /**
- * Phase P Feature E — launch ramps (stepped static-box wedges converted from cubes).
- * No rotated-collider primitive needed: the steps are axis-aligned and the ramp faces a
- * cardinal direction. Kept low + climbable for a radius-0.5 marble (roll up, pop off); the
- * true smooth-wedge version is the WASM upgrade documented in docs/PLAN.md Feature E.
+ * Phase P Feature E — launch PYRAMIDS converted from cubes. Cycle B made the collider a TRUE
+ * SMOOTH pyramid: a single convex hull (base square + apex) via the WASM `create_static_pyramid`
+ * primitive (box3d `b3CreateHull`), replacing the old 6-tier axis-aligned stepped ziggurat. The
+ * collider now matches the smooth pyramid visual exactly — the marble rolls up a clean incline and
+ * launches off the apex, with no stepped treads and no box-decomposition ridges.
  */
 export const RAMP = {
-    /** Stepped boxes approximating the slope. More = smoother climb, more static bodies. */
-    steps: 6,
-    /** Total rise (u) from ground to the launch lip. ~1.4u over a 3.5u run ≈ a climbable, poppy ramp. */
+    /** Total rise (u) from ground to the apex. ~1.4u over a 3.5u run ≈ a climbable, poppy ramp. */
     rise: 1.4,
 } as const
 

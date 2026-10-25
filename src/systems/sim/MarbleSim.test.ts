@@ -38,6 +38,8 @@ function makeBridge(): MarbleBox3DBridgeExports {
         createStaticBox: vi.fn(() => nextBodyId++),
         createDynamicSphere: vi.fn(() => nextBodyId++),
         createDynamicBox: vi.fn(() => nextBodyId++),
+        createStaticPyramid: vi.fn(() => nextBodyId++),
+        createStaticCylinder: vi.fn(() => nextBodyId++),
         createHeightfield: vi.fn(() => nextBodyId++),
         bodyDestroy: vi.fn(),
         bodyApplyTorque: vi.fn(),
@@ -104,8 +106,10 @@ describe('MarbleSim static obstacle scatter', () => {
             expect(pos.x * pos.x + pos.z * pos.z).toBeGreaterThanOrEqual(clearRadiusSq)
         }
 
-        // 1 flat-slab static floor (no heights passed) + cubeCount + columnCount static boxes.
-        expect(bridge.createStaticBox).toHaveBeenCalledTimes(1 + cubeCount + columnCount)
+        // 1 flat-slab static floor (no heights passed) + cubeCount cube boxes. Columns are now
+        // round CYLINDER colliders (createStaticCylinder), not boxes.
+        expect(bridge.createStaticBox).toHaveBeenCalledTimes(1 + cubeCount)
+        expect(bridge.createStaticCylinder).toHaveBeenCalledTimes(columnCount)
     })
 
     it('rests cube/column centers exactly half-height above the analytic terrain at their (x, z)', () => {

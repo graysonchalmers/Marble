@@ -1,0 +1,20 @@
+.cut-lab { position: fixed; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; background: #171b22; color: #eef0f4; font: 14px/1.5 system-ui, sans-serif; z-index: 100; }
+.cut-viewport { position: relative; min-height: 0; min-width: 0; overflow: hidden; }
+.cut-caption { position: absolute; bottom: 20px; left: 24px; color: #bbc3ce; pointer-events: none; }
+.cut-panel { min-width: 0; padding: 24px; overflow-y: auto; background: #20252e; border-left: 1px solid #3b424e; }
+.cut-panel a { color: #cbd2df; }
+.cut-eyebrow { font-size: 10px; letter-spacing: 0.16em; margin-top: 28px; color: #a6b0bf; }
+.cut-panel h1 { font-size: 30px; margin: 6px 0 14px; }
+.cut-panel p { color: #bbc3ce; }
+.cut-check { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
+.cut-panel input { accent-color: #cbd2df; }
+.cut-slider { display: block; margin: 12px 0; }
+.cut-slider span { display: flex; justify-content: space-between; font-size: 12px; }
+.cut-slider output { font-variant-numeric: tabular-nums; color: #a6b0bf; }
+.cut-slider input { display: block; width: 100%; margin: 7px 0; }
+.cut-slider select { box-sizing: border-box; width: 100%; background: #353d4a; color: #eef0f4; border: 1px solid #5b6678; padding: 8px; margin-top: 6px; }
+.cut-endpoints { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.cut-endpoints fieldset { min-width: 0; margin: 12px 0; padding: 8px; border: 1px solid #4b5361; }
+.cut-panel button { width: 100%; padding: 10px; background: #353d4a; border: 1px solid #5b6678; border-radius: 5px; color: #fff; cursor: pointer; }
+.cut-note { font-size: 11px; }
+@media (max-width: 700px) { .cut-lab { grid-template-columns: 1fr; grid-template-rows: minmax(220px, 45%) minmax(0, 1fr); } .cut-panel { padding: 16px 22px; border-left: 0; border-top: 1px solid #3b424e; } .cut-eyebrow { margin-top: 12px; } .cut-panel h1 { font-size: 24px; margin-bottom: 8px; } .cut-caption { bottom: 10px; left: 16px; font-size: 11px; } }
