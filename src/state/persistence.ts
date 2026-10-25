@@ -2,7 +2,7 @@ import type { SettingsState } from "./types";
 import { MOVEMENT, ENEMY, DEFAULT_TERRAIN_ROUGHNESS, DEFAULT_CRUMBLE_COUNT } from "../systems/sim/tuning";
 
 const STORAGE_KEY = "MARBLE_GAME_SETTINGS_V2";
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 
 export const DEFAULT_SETTINGS: SettingsState = {
   jumpForce: 5,
@@ -131,7 +131,9 @@ export const V2_PRESET: SettingsState = {
 function migrate(saved: any): SettingsState {
   const version = saved.schemaVersion ?? saved.version ?? 0;
   // Adopt the cylinder for the former default; preserve explicitly selected alternatives.
-  if (version < 13 && saved.occlusionMode === "ghost") saved.occlusionMode = "cylinder";
+  // v14: two branches each bumped 12->13 (render-subtraction here, beliefSearch on v2); 14 merges them.
+  // Gate on < 14 so saves already at v2's 13 still adopt the cylinder.
+  if (version < 14 && saved.occlusionMode === "ghost") saved.occlusionMode = "cylinder";
   
   if (version < SCHEMA_VERSION) {
     console.log(`Migrating settings from version ${version} to ${SCHEMA_VERSION}`);
